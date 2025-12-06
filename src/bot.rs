@@ -885,12 +885,15 @@ impl<B: Backend> TelegramBot<B> {
             inline_keyboard: vec![vec![
                 InlineKeyboardButton::callback(
                     format!(
-                        "🤔 Я тоже не приду {}",
+                        "🚋 А я приду {}",
                         format_close_date(day).unwrap_or("в этот день")
                     ),
+                    format!("/planvisit {}", day),
+                ),
+                InlineKeyboardButton::callback(
+                    "🤔 Я тоже не приду",
                     format!("/unplanvisit {}", day),
                 ),
-                InlineKeyboardButton::callback("🚋 Или приду", format!("/planvisit {}", day)),
             ]],
         })
         .await?;
