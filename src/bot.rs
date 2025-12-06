@@ -48,7 +48,7 @@ enum Command {
     UnplanVisit,
     #[command(description = "👷 Примкнуть к зашедшим (опционально описание — зачем)")]
     CheckIn,
-    #[command(description = "🌆 Примкнуть к ушедшим")]
+    #[command(description = "🌆 Пометить что ушед")]
     CheckOut,
     #[command(description = "🌒 Закрыть хакспейс")]
     Close,
