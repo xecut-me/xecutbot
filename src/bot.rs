@@ -31,24 +31,24 @@ use crate::{backend::Uid, utils::today};
 #[command(rename_rule = "lowercase")]
 enum Command {
     #[command(
-        description = "📮 Репостнуть пост в live канал (реплайни на пост, доступно только резидентам)"
+        description = "📮 Репостнуть пост в live-канал (реплайни на пост, доступно только резидентам)"
     )]
     PostLive,
-    #[command(description = "ℹ️ Посмотреть что сейчас происходит в хакспейсе")]
+    #[command(description = "ℹ️ Посмотреть, что сейчас происходит в хакспейсе")]
     Status,
-    #[command(description = "🗓️ Посмотреть кто собирается в хакспейс в ближайшие дни")]
+    #[command(description = "🗓️ Посмотреть, кто собирается в хакспейс в ближайшие дни")]
     GetVisits,
     #[command(
-        description = "🗓️ Запланировать зайти в хакспейс (опционально дата в формате YYYY-MM-DD и описание зачем)"
+        description = "🗓️ Запланировать зайти в хакспейс (опционально дата в формате YYYY-MM-DD и описание — зачем)"
     )]
     PlanVisit,
     #[command(
         description = "🤔 Передумать заходить в хакспейс (опционально дата в формате YYYY-MM-DD)"
     )]
     UnplanVisit,
-    #[command(description = "👷 Отметиться как зашедший (опционально описание зачем)")]
+    #[command(description = "👷 Примкнуть к зашедшим (опционально описание — зачем)")]
     CheckIn,
-    #[command(description = "🌆 Отметиться как ушедший")]
+    #[command(description = "🌆 Примкнуть к ушедшим")]
     CheckOut,
     #[command(description = "🌒 Закрыть хакспейс")]
     Close,
@@ -154,7 +154,7 @@ impl<B: Backend> TelegramBot<B> {
 
     async fn send_alert(&self) -> Result<()> {
         self.bot
-            .send_message(self.config.alert_chat_id, "💥 Что-то пошло не так")
+            .send_message(self.config.alert_chat_id, "💥 Что-то пойде не так")
             .await?;
         Ok(())
     }
@@ -180,7 +180,7 @@ impl<B: Backend> TelegramBot<B> {
                     self_clone
                         .send_message_reply(
                             &msg,
-                            "😬 Что-то пошло не так, но админ уже об этом знает",
+                            "😬 Что-то пойде не так, но админ уже об этом знает",
                         )
                         .await?;
                     if let Ok(e) = res {
@@ -204,7 +204,7 @@ impl<B: Backend> TelegramBot<B> {
                     self_clone.send_alert().await?;
                     self_clone
                         .send_message_public_chat(
-                            "😬 Что-то пошло не так, но админ уже об этом знает",
+                            "😬 Что-то пойде не так, но админ уже об этом знает",
                         )
                         .await?;
                     if let Ok(e) = res {
@@ -240,12 +240,12 @@ impl<B: Backend> TelegramBot<B> {
         InlineKeyboardMarkup {
             inline_keyboard: vec![
                 vec![
-                    InlineKeyboardButton::callback("👷 Я зашёл", "/checkin"),
-                    InlineKeyboardButton::callback("🌆 Я ушёл", "/checkout"),
+                    InlineKeyboardButton::callback("👷 Я зашед", "/checkin"),
+                    InlineKeyboardButton::callback("🌆 Я ушед", "/checkout"),
                 ],
                 vec![
                     InlineKeyboardButton::callback("🚋 Зайду сегодня", "/planvisit"),
-                    InlineKeyboardButton::callback("🤔 Передумал", "/unplanvisit"),
+                    InlineKeyboardButton::callback("🤔 Передумах", "/unplanvisit"),
                 ],
             ],
         }
@@ -415,7 +415,7 @@ impl<B: Backend> TelegramBot<B> {
 
         self.send_message_reply(
             msg,
-            format!("✔️ Запостил в <a href=\"{forwarded_message_url}\">{channel_name}</a>"),
+            format!("✔️ Запостих в <a href=\"{forwarded_message_url}\">{channel_name}</a>"),
         )
         .await?;
 
@@ -484,25 +484,41 @@ impl<B: Backend> TelegramBot<B> {
             status.push_str(&checked_in);
         }
 
-        let planned = visits
+        let planned_visits = visits
             .iter()
             .filter(|v| v.status == VisitStatus::Planned)
             .map(|v| self.format_visit_without_status(v, &details[&v.person]))
-            .join("\n");
+            .collect::<Vec<String>>();
+
+        let planned = planned_visits.join("\n");
 
         if !planned.is_empty() {
-            status.push_str("\n\n📅 Планировали зайти:\n");
+            status.push_str("\n\n📅 Планирова");
+            status.push_str(match planned_visits.len() {
+                1 => "ше",
+                2 => "шете",
+                _ => "ху",
+            });
+            status.push_str(" зайти:\n");
             status.push_str(&planned);
         }
 
-        let left = visits
+        let checked_out_visits = visits
             .iter()
             .filter(|v| v.status == VisitStatus::CheckedOut)
             .map(|v| self.format_visit_without_status(v, &details[&v.person]))
-            .join("\n");
+            .collect::<Vec<String>>();
+
+        let left = checked_out_visits.join("\n");
 
         if !left.is_empty() {
-            status.push_str("\n\n🌆 Уже ушли:\n");
+            status.push_str("\n\n🌆 Уже уйд");
+            status.push_str(match planned_visits.len() {
+                1 => "е",
+                2 => "оста",
+                _ => "оша",
+            });
+            status.push_str(":\n");
             status.push_str(&left);
         }
 
@@ -552,7 +568,7 @@ impl<B: Backend> TelegramBot<B> {
         let status_str = match v.status {
             VisitStatus::Planned => "",
             VisitStatus::CheckedIn => " (сейчас в спейсе 👷)",
-            VisitStatus::CheckedOut => " (ушёл 🌆)",
+            VisitStatus::CheckedOut => " (уйде 🌆)",
         };
         format!(
             "{}{}",
@@ -804,7 +820,7 @@ impl<B: Backend> TelegramBot<B> {
 
     pub async fn announce_check_in(&self, visit_update: &VisitUpdate) -> Result<()> {
         self.send_message_public_chat(format!(
-            "👷 {} пришёл в хакспейс{}",
+            "👷 {} прийде в хакспейс{}",
             self.format_person_link(&self.fetch_person_details(visit_update.person).await?),
             visit_update
                 .purpose
@@ -815,7 +831,7 @@ impl<B: Backend> TelegramBot<B> {
         .reply_markup(InlineKeyboardMarkup {
             inline_keyboard: vec![vec![
                 InlineKeyboardButton::callback("👷 Я тоже в спейсе", "/checkin"),
-                InlineKeyboardButton::callback("🌆 А я уже ушёл", "/checkout"),
+                InlineKeyboardButton::callback("🌆 А я уже ушед", "/checkout"),
             ]],
         })
         .await?;
