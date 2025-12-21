@@ -42,14 +42,25 @@ impl Visits {
         Ok(Visits { pool })
     }
 
-    pub async fn run(self) {
+    pub async fn run(
+        self,
+        shutdown_signal: impl Future<Output = ()> + Send + 'static,
+    ) -> Result<()> {
         let ct = CancellationToken::new();
         let ct_wait = ct.clone();
+
+        log::info!("Starting the visits database");
+
         tokio::spawn(async move {
-            tokio::signal::ctrl_c().await.unwrap();
-            ct_wait.cancel();
+            self.cleanup_loop(ct).await;
         });
-        self.cleanup_loop(ct).await;
+
+        shutdown_signal.await;
+
+        log::info!("Shutting down the visits database");
+
+        ct_wait.cancel();
+        Ok(())
     }
 
     async fn cleanup_loop(&self, ct: CancellationToken) {

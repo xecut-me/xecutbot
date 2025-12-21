@@ -24,17 +24,18 @@ impl<B: Backend> RestApi<B> {
         RestApi { config, backend }
     }
 
-    pub async fn run(self) -> Result<()> {
+    pub async fn run(
+        self,
+        shutdown_signal: impl Future<Output = ()> + Send + 'static,
+    ) -> Result<()> {
+        log::info!("Starting REST API");
         axum::serve(
             tokio::net::TcpListener::bind(&self.config.bind_address).await?,
             Self::router(self),
         )
-        .with_graceful_shutdown(async move {
-            tokio::signal::ctrl_c()
-                .await
-                .expect("listening for Ctrl-C should succeed");
-        })
+        .with_graceful_shutdown(shutdown_signal)
         .await?;
+        log::info!("Shutting down REST API");
         Ok(())
     }
 

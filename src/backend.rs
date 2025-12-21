@@ -2,6 +2,8 @@ use std::{path::PathBuf, sync::Arc};
 
 use anyhow::Result;
 use chrono::NaiveDate;
+use futures::FutureExt as _;
+use futures::future::try_join_all;
 use sqlx::SqlitePool;
 use teloxide::types::UserId;
 
@@ -165,13 +167,18 @@ impl BackendImpl {
     }
 
     pub async fn run(self: Arc<Self>) -> Result<()> {
-        let results = tokio::try_join!(
-            tokio::spawn(self.visits.clone().run()),
-            tokio::spawn(self.tg_bot.clone().run()),
-            tokio::spawn(self.rest_api.clone().run())
-        )?;
-        results.1?;
-        results.2?;
+        let shutdown_signal = async {
+            tokio::signal::ctrl_c().await.unwrap();
+        }
+        .shared();
+
+        let futures = vec![
+            tokio::spawn(self.visits.clone().run(shutdown_signal.clone())),
+            tokio::spawn(self.tg_bot.clone().run(shutdown_signal.clone())),
+            tokio::spawn(self.rest_api.clone().run(shutdown_signal)),
+        ];
+
+        try_join_all(futures).await?;
 
         Ok(())
     }

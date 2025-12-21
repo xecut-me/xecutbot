@@ -142,7 +142,10 @@ impl<B: Backend> TelegramBot<B> {
         Ok(())
     }
 
-    pub async fn run(self: Arc<Self>) -> Result<()> {
+    pub async fn run(
+        self: Arc<Self>,
+        shutdown_signal: impl Future<Output = ()> + Send + 'static,
+    ) -> Result<()> {
         log::info!("Starting Telegram bot");
 
         self.bot.set_my_commands(Command::bot_commands()).await?;
@@ -208,11 +211,26 @@ impl<B: Backend> TelegramBot<B> {
 
         let live_update_ct = self.clone().spawn_update_live_task().await;
 
-        Dispatcher::builder(self.bot.clone(), handler)
-            .enable_ctrlc_handler()
-            .build()
-            .dispatch()
-            .await;
+        let mut dispatcher = Dispatcher::builder(self.bot.clone(), handler).build();
+
+        let token = dispatcher.shutdown_token();
+
+        tokio::spawn(async move {
+            dispatcher.dispatch().await;
+        });
+
+        shutdown_signal.await;
+
+        match token.shutdown() {
+            Ok(f) => {
+                f.await;
+            }
+            Err(_) => {
+                log::info!(
+                    "Shutdown signal received, the dispatcher isn't running, ignoring the signal"
+                )
+            }
+        }
 
         live_update_ct.cancel();
 
