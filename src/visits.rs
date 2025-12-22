@@ -72,7 +72,7 @@ impl Visits {
                 _ = ct.cancelled() => { break }
             };
             log::debug!("Visits cleanup task running");
-            self.cleanup(crate::utils::now())
+            self.cleanup(crate::time::now())
                 .await
                 .expect("successful cleanup");
         }

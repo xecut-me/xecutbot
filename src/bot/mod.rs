@@ -1,0 +1,210 @@
+mod announcements;
+mod livestatus;
+mod person_details;
+mod status;
+mod util;
+mod visits;
+
+use anyhow::Result;
+use futures::FutureExt;
+use std::{
+    panic::AssertUnwindSafe,
+    sync::{Arc, RwLock, Weak},
+};
+
+use teloxide::{
+    Bot,
+    dispatching::{HandlerExt as _, UpdateFilterExt as _},
+    dptree,
+    prelude::{Dispatcher, Requester as _},
+    types::{CallbackQuery, Message, MessageId, Update},
+    utils::command::BotCommands,
+};
+
+use crate::backend::Uid;
+use crate::{backend::Backend, config::TelegramBotConfig};
+
+#[derive(BotCommands, Clone, Copy)]
+#[command(rename_rule = "lowercase")]
+enum Command {
+    #[command(
+        description = "📮 Репостнуть пост в live канал (реплайни на пост, доступно только резидентам)"
+    )]
+    PostLive,
+    #[command(description = "ℹ️ Посмотреть что сейчас происходит в хакспейсе")]
+    Status,
+    #[command(description = "🗓️ Посмотреть кто собирается в хакспейс в ближайшие дни")]
+    GetVisits,
+    #[command(
+        description = "🗓️ Запланировать зайти в хакспейс (опционально дата в формате YYYY-MM-DD и описание зачем)"
+    )]
+    PlanVisit,
+    #[command(
+        description = "🤔 Передумать заходить в хакспейс (опционально дата в формате YYYY-MM-DD)"
+    )]
+    UnplanVisit,
+    #[command(description = "👷 Отметиться как зашедший (опционально описание зачем)")]
+    CheckIn,
+    #[command(description = "🌆 Отметиться как ушедший")]
+    CheckOut,
+    #[command(description = "🌒 Закрыть хакспейс")]
+    Close,
+    #[command(description = "🔃 Сделать закреп с текущей информацией о спейсе")]
+    LiveStatus,
+    #[command(description = "🧟 Убрать закреп с текущей информацией о спейсе")]
+    UnLiveStatus,
+}
+
+pub struct TelegramBot<B: Backend> {
+    config: TelegramBotConfig,
+    pub bot: Bot,
+    status_message_id: RwLock<Option<MessageId>>,
+    backend: Weak<B>,
+}
+
+impl<B: Backend> TelegramBot<B> {
+    pub fn new(config: TelegramBotConfig, backend: Weak<B>) -> Result<Arc<Self>> {
+        let bot = Bot::new(config.bot_token.clone());
+        Ok(Arc::new(TelegramBot {
+            config,
+            bot,
+            status_message_id: RwLock::new(None),
+            backend,
+        }))
+    }
+
+    // Can not panic during execution of run(), because Backend is already constructed and not destructed yet
+    fn backend(&self) -> Arc<B> {
+        self.backend.upgrade().expect("Backend to be available")
+    }
+
+    async fn send_alert(&self) -> Result<()> {
+        self.bot
+            .send_message(self.config.alert_chat_id, "💥 Что-то пошло не так")
+            .await?;
+        Ok(())
+    }
+
+    pub async fn run(
+        self: Arc<Self>,
+        shutdown_signal: impl Future<Output = ()> + Send + 'static,
+    ) -> Result<()> {
+        self.bot.set_my_commands(Command::bot_commands()).await?;
+
+        *self.status_message_id.write().unwrap() =
+            livestatus::load_status_message_id(self.backend().pool()).await?;
+
+        let handler = dptree::entry()
+            .inspect(|u: Update| {
+                log::trace!("Got update:\n{u:#?}");
+            })
+            .branch(
+                Update::filter_message()
+                    .filter_command::<Command>()
+                    .endpoint(Self::handle_message),
+            )
+            .branch(Update::filter_callback_query().endpoint(Self::handle_callback_outer));
+
+        let _live_update_guard = self.clone().spawn_update_live_task().drop_guard();
+
+        let mut dispatcher = Dispatcher::builder(self.bot.clone(), handler)
+            .dependencies(dptree::deps![self.clone()])
+            .build();
+
+        let token = dispatcher.shutdown_token();
+
+        tokio::spawn(async move {
+            log::info!("Started Telegram bot");
+            dispatcher.dispatch().await;
+        });
+
+        shutdown_signal.await;
+
+        match token.shutdown() {
+            Ok(f) => {
+                f.await;
+            }
+            Err(_) => {
+                log::info!(
+                    "Shutdown signal received, the dispatcher isn't running, ignoring the signal"
+                )
+            }
+        }
+
+        log::info!("Stopped Telegram bot");
+
+        Ok(())
+    }
+
+    async fn handle_message(self: Arc<Self>, msg: Message, cmd: Command) -> Result<()> {
+        let res = AssertUnwindSafe(async {
+            match cmd {
+                Command::PostLive => self.handle_post_live(&msg).await,
+                Command::Status => self.handle_status(&msg).await,
+                Command::GetVisits => self.handle_get_visits(&msg).await,
+                Command::PlanVisit => self.handle_plan_visit(&msg).await,
+                Command::UnplanVisit => self.handle_unplan_visit(&msg).await,
+                Command::CheckIn => self.handle_check_in(&msg).await,
+                Command::CheckOut => self.handle_check_out(&msg).await,
+                Command::Close => self.handle_close(&msg).await,
+                Command::LiveStatus => self.handle_live_status(&msg).await,
+                Command::UnLiveStatus => self.handle_unlive_status(&msg).await,
+            }
+        })
+        .catch_unwind()
+        .await;
+        if matches!(res, Err(_) | Ok(Err(_))) {
+            self.send_alert().await?;
+            self.send_message_reply(&msg, "😬 Что-то пошло не так, но админ уже об этом знает")
+                .await?;
+            if let Ok(e) = res {
+                return e;
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_callback_outer(self: Arc<Self>, q: CallbackQuery) -> Result<()> {
+        let res = AssertUnwindSafe(self.handle_callback(&q))
+            .catch_unwind()
+            .await;
+        self.bot.answer_callback_query(q.id.clone()).await?;
+        if matches!(res, Err(_) | Ok(Err(_))) {
+            self.send_alert().await?;
+            self.send_message_public_chat("😬 Что-то пошло не так, но админ уже об этом знает")
+                .await?;
+            if let Ok(e) = res {
+                return e;
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_callback(&self, q: &CallbackQuery) -> Result<()> {
+        let Some(data) = q.data.as_deref() else {
+            return Ok(());
+        };
+
+        let author = Uid(q.from.id);
+
+        if data.starts_with("/planvisit") {
+            let visit_update = visits::parse_visit_text(author, util::strip_command(data));
+            self.backend()
+                .plan_visit(visit_update.person, visit_update.day, visit_update.purpose)
+                .await?;
+        } else if data.starts_with("/unplanvisit") {
+            let visit_update = visits::parse_visit_text(author, util::strip_command(data));
+            self.backend()
+                .unplan_visit(visit_update.person, visit_update.day)
+                .await?;
+        } else if data == "/checkin" {
+            self.backend().check_in(author, None).await?;
+        } else if data == "/checkout" {
+            self.backend().check_out(author).await?;
+        } else {
+            anyhow::bail!("unhandled callback query: {:?}", q);
+        }
+
+        Ok(())
+    }
+}

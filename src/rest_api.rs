@@ -11,7 +11,7 @@ use axum::{
 use derive_where::derive_where;
 use tower_http::catch_panic::CatchPanicLayer;
 
-use crate::{VisitStatus, backend::Backend, config::RestApiConfig, utils::today};
+use crate::{VisitStatus, backend::Backend, config::RestApiConfig, time::today};
 
 #[derive_where(Clone)]
 pub struct RestApi<B: Backend> {
@@ -35,7 +35,7 @@ impl<B: Backend> RestApi<B> {
         )
         .with_graceful_shutdown(shutdown_signal)
         .await?;
-        log::info!("Shutting down REST API");
+        log::info!("Stopped down REST API");
         Ok(())
     }
 

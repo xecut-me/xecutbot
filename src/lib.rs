@@ -3,7 +3,7 @@ pub mod bot;
 pub mod config;
 pub mod date;
 pub mod rest_api;
-pub mod utils;
+pub mod time;
 pub mod visits;
 
 pub use bot::TelegramBot;

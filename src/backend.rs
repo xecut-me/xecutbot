@@ -7,11 +7,12 @@ use futures::future::try_join_all;
 use sqlx::SqlitePool;
 use teloxide::types::UserId;
 
+use crate::bot::TelegramBot;
 use crate::config::DbConfig;
 use crate::rest_api::RestApi;
-use crate::utils::today;
+use crate::time::today;
 use crate::visits::VisitUpdate;
-use crate::{Config, TelegramBot, Visit, VisitStatus, Visits};
+use crate::{Config, Visit, VisitStatus, Visits};
 
 #[derive(Clone)]
 pub struct BackendImpl {
@@ -175,7 +176,7 @@ impl BackendImpl {
         let futures = vec![
             tokio::spawn(self.visits.clone().run(shutdown_signal.clone())),
             tokio::spawn(self.tg_bot.clone().run(shutdown_signal.clone())),
-            tokio::spawn(self.rest_api.clone().run(shutdown_signal)),
+            tokio::spawn(self.rest_api.clone().run(shutdown_signal.clone())),
         ];
 
         try_join_all(futures).await?;
