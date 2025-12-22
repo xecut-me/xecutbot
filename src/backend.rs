@@ -2,10 +2,10 @@ use std::{path::PathBuf, sync::Arc};
 
 use anyhow::Result;
 use chrono::NaiveDate;
-use futures::FutureExt as _;
-use futures::future::try_join_all;
 use sqlx::SqlitePool;
 use teloxide::types::UserId;
+use tokio::task::JoinSet;
+use tokio_util::sync::CancellationToken;
 
 use crate::bot::TelegramBot;
 use crate::config::DbConfig;
@@ -168,18 +168,22 @@ impl BackendImpl {
     }
 
     pub async fn run(self: Arc<Self>) -> Result<()> {
-        let shutdown_signal = async {
+        let ct = CancellationToken::new();
+
+        let mut js = JoinSet::new();
+
+        js.spawn(self.visits.clone().run(ct.clone()));
+        js.spawn(self.tg_bot.clone().run(ct.clone()));
+        js.spawn(self.rest_api.clone().run(ct.clone()));
+
+        tokio::spawn(async move {
             tokio::signal::ctrl_c().await.unwrap();
+            ct.cancel();
+        });
+
+        while let Some(r) = js.join_next().await {
+            let _ = r?;
         }
-        .shared();
-
-        let futures = vec![
-            tokio::spawn(self.visits.clone().run(shutdown_signal.clone())),
-            tokio::spawn(self.tg_bot.clone().run(shutdown_signal.clone())),
-            tokio::spawn(self.rest_api.clone().run(shutdown_signal.clone())),
-        ];
-
-        try_join_all(futures).await?;
 
         Ok(())
     }

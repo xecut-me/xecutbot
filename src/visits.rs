@@ -42,28 +42,14 @@ impl Visits {
         Ok(Visits { pool })
     }
 
-    pub async fn run(
-        self,
-        shutdown_signal: impl Future<Output = ()> + Send + 'static,
-    ) -> Result<()> {
-        let ct = CancellationToken::new();
-        let ct_wait = ct.clone();
-
-        log::info!("Starting the visits database");
-
-        tokio::spawn(async move {
-            self.cleanup_loop(ct).await;
-        });
-
-        shutdown_signal.await;
-
-        log::info!("Shutting down the visits database");
-
-        ct_wait.cancel();
+    pub async fn run(self, ct: CancellationToken) -> Result<()> {
+        self.cleanup_loop(ct).await;
         Ok(())
     }
 
     async fn cleanup_loop(&self, ct: CancellationToken) {
+        log::info!("Started visits cleanup task");
+
         let mut interval = tokio::time::interval(VISITS_CLEANUP_INTERVAL);
 
         loop {
@@ -76,6 +62,8 @@ impl Visits {
                 .await
                 .expect("successful cleanup");
         }
+
+        log::info!("Stopped visits cleanup task");
     }
 
     pub async fn get_visits(&self, from: NaiveDate, to: NaiveDate) -> Result<Vec<Visit>> {

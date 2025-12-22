@@ -10,7 +10,9 @@ use futures::FutureExt;
 use std::{
     panic::AssertUnwindSafe,
     sync::{Arc, RwLock, Weak},
+    time::Duration,
 };
+use tokio_util::sync::CancellationToken;
 
 use teloxide::{
     Bot,
@@ -85,10 +87,7 @@ impl<B: Backend> TelegramBot<B> {
         Ok(())
     }
 
-    pub async fn run(
-        self: Arc<Self>,
-        shutdown_signal: impl Future<Output = ()> + Send + 'static,
-    ) -> Result<()> {
+    pub async fn run(self: Arc<Self>, ct: CancellationToken) -> Result<()> {
         self.bot.set_my_commands(Command::bot_commands()).await?;
 
         *self.status_message_id.write().unwrap() =
@@ -105,33 +104,28 @@ impl<B: Backend> TelegramBot<B> {
             )
             .branch(Update::filter_callback_query().endpoint(Self::handle_callback_outer));
 
-        let _live_update_guard = self.clone().spawn_update_live_task().drop_guard();
-
         let mut dispatcher = Dispatcher::builder(self.bot.clone(), handler)
             .dependencies(dptree::deps![self.clone()])
             .build();
 
         let token = dispatcher.shutdown_token();
-
+        let ct1 = ct.clone();
         tokio::spawn(async move {
-            log::info!("Started Telegram bot");
-            dispatcher.dispatch().await;
+            ct1.cancelled().await;
+            while token.shutdown().is_err() {
+                log::warn!("Dispatcher not running yet, retrying to shut down");
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            log::info!("Shutting down dispatcher");
         });
 
-        shutdown_signal.await;
-
-        match token.shutdown() {
-            Ok(f) => {
-                f.await;
-            }
-            Err(_) => {
-                log::info!(
-                    "Shutdown signal received, the dispatcher isn't running, ignoring the signal"
-                )
-            }
-        }
-
-        log::info!("Stopped Telegram bot");
+        tokio::try_join!(
+            tokio::spawn(async move {
+                log::info!("Started dispatcher");
+                dispatcher.dispatch().await
+            }),
+            tokio::spawn(self.clone().update_live_task(ct))
+        )?;
 
         Ok(())
     }

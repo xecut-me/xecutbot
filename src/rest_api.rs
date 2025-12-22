@@ -9,6 +9,7 @@ use axum::{
     routing::get,
 };
 use derive_where::derive_where;
+use tokio_util::sync::CancellationToken;
 use tower_http::catch_panic::CatchPanicLayer;
 
 use crate::{VisitStatus, backend::Backend, config::RestApiConfig, time::today};
@@ -24,18 +25,15 @@ impl<B: Backend> RestApi<B> {
         RestApi { config, backend }
     }
 
-    pub async fn run(
-        self,
-        shutdown_signal: impl Future<Output = ()> + Send + 'static,
-    ) -> Result<()> {
+    pub async fn run(self, ct: CancellationToken) -> Result<()> {
         log::info!("Starting REST API");
         axum::serve(
             tokio::net::TcpListener::bind(&self.config.bind_address).await?,
             Self::router(self),
         )
-        .with_graceful_shutdown(shutdown_signal)
+        .with_graceful_shutdown(ct.cancelled_owned())
         .await?;
-        log::info!("Stopped down REST API");
+        log::info!("Stopped REST API");
         Ok(())
     }
 

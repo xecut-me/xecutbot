@@ -143,45 +143,35 @@ impl<B: Backend> super::TelegramBot<B> {
         Ok(())
     }
 
-    pub(super) fn spawn_update_live_task(self: &Arc<Self>) -> CancellationToken {
-        let cancellation_token = CancellationToken::new();
-        let result = cancellation_token.clone();
-        let self_clone = self.clone();
+    pub(super) async fn update_live_task(self: Arc<Self>, ct: CancellationToken) {
+        log::info!("Started live update task");
 
-        tokio::task::spawn(async move {
-            log::info!("Started live update task");
+        let mut interval = tokio::time::interval(LIVE_UPDATE_INTERVAL);
 
-            let mut interval = tokio::time::interval(LIVE_UPDATE_INTERVAL);
+        let mut last_live_status = None;
 
-            let mut last_live_status = None;
-
-            loop {
-                tokio::select! {
-                    _ = interval.tick() => {}
-                    _ = cancellation_token.cancelled() => { break }
-                };
-                log::trace!("Updating status message");
-                let new_live_status = match self_clone.get_status().await {
-                    Ok(s) => s,
-                    Err(e) => {
-                        log::error!("Error getting live status: {:?}", e);
-                        continue;
-                    }
-                };
-                if last_live_status.is_none_or(|ref v| v != &new_live_status)
-                    && let Err(e) = self_clone
-                        .update_live_status_message(&new_live_status)
-                        .await
-                {
-                    log::error!("Error updating status message: {:?}", e);
+        loop {
+            tokio::select! {
+                _ = interval.tick() => {}
+                _ = ct.cancelled() => { break }
+            };
+            log::trace!("Updating status message");
+            let new_live_status = match self.get_status().await {
+                Ok(s) => s,
+                Err(e) => {
+                    log::error!("Error getting live status: {:?}", e);
+                    continue;
                 }
-                last_live_status = Some(new_live_status);
+            };
+            if last_live_status.is_none_or(|ref v| v != &new_live_status)
+                && let Err(e) = self.update_live_status_message(&new_live_status).await
+            {
+                log::error!("Error updating status message: {:?}", e);
             }
+            last_live_status = Some(new_live_status);
+        }
 
-            log::info!("Stopped live update task");
-        });
-
-        result
+        log::info!("Stopped live update task");
     }
 
     pub(super) async fn handle_post_live(&self, msg: &Message) -> Result<()> {
