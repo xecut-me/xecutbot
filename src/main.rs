@@ -11,7 +11,7 @@ struct Cli {
 #[tokio::main]
 async fn main() -> Result<()> {
     tokio::spawn(async move {
-        pretty_env_logger::init_timed();
+        env_logger::init();
         let args = Cli::parse();
         let backend = BackendImpl::new(args.config).await?;
         backend.run().await?;
