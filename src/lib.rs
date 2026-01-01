@@ -3,6 +3,7 @@ pub mod bot;
 pub mod config;
 pub mod date;
 pub mod rest_api;
+pub mod selfupdate;
 pub mod time;
 pub mod visits;
 

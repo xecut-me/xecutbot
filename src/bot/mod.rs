@@ -55,6 +55,8 @@ enum Command {
     LiveStatus,
     #[command(description = "🧟 Убрать закреп с текущей информацией о спейсе")]
     UnLiveStatus,
+    #[command(hide)]
+    Update,
 }
 
 pub struct TelegramBot<B: Backend> {
@@ -143,6 +145,7 @@ impl<B: Backend> TelegramBot<B> {
                 Command::Close => self.handle_close(&msg).await,
                 Command::LiveStatus => self.handle_live_status(&msg).await,
                 Command::UnLiveStatus => self.handle_unlive_status(&msg).await,
+                Command::Update => self.handle_update(&msg).await,
             }
         })
         .catch_unwind()
@@ -155,6 +158,21 @@ impl<B: Backend> TelegramBot<B> {
                 return e;
             }
         }
+        Ok(())
+    }
+
+    async fn handle_update(&self, msg: &Message) -> Result<()> {
+        if !self.check_author_is_resident(msg).await? {
+            return Ok(());
+        }
+
+        if !self.backend().update().await? {
+            self.send_message_reply(msg, "❌ Обновления выключены")
+                .await?;
+        } else {
+            self.acknowledge_message(msg).await?;
+        }
+
         Ok(())
     }
 

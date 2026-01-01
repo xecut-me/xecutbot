@@ -8,3 +8,5 @@ telegram_bot:
   alert_chat_id: 0
 db:
   sqlite_path: "xecut_bot.sqlite?mode=rwc"
+backend:
+  enable_update: false

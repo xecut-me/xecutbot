@@ -30,12 +30,19 @@ impl Default for RestApiConfig {
     }
 }
 
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct BackendConfig {
+    pub enable_update: bool,
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct Config {
     pub telegram_bot: TelegramBotConfig,
     pub db: DbConfig,
     #[serde(default)]
     pub rest_api: RestApiConfig,
+    #[serde(default)]
+    pub backend: BackendConfig,
 }
 
 impl Config {

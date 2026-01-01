@@ -11,7 +11,11 @@ edition = "2024"
 teloxide = { version = "0.17.0", features = ["macros"] }
 log = "0.4"
 env_logger = "0.11"
-tokio = { version = "1.46", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1.46", features = [
+    "rt-multi-thread",
+    "process",
+    "macros",
+] }
 tokio-util = "0.7"
 config = "0.15"
 anyhow = "1.0"

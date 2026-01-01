@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
-use xecut_bot::backend::BackendImpl;
+use xecut_bot::{backend::BackendImpl, selfupdate};
 
 #[derive(Parser, Debug)]
 struct Cli {
@@ -14,7 +14,12 @@ async fn main() -> Result<()> {
         env_logger::init();
         let args = Cli::parse();
         let backend = BackendImpl::new(args.config).await?;
-        backend.run().await?;
+        let should_reexec = backend.run().await?;
+
+        if should_reexec {
+            selfupdate::reexec();
+        }
+
         Ok(())
     })
     .await?

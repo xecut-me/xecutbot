@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{path::PathBuf, sync::Arc};
 
 use anyhow::Result;
@@ -8,18 +9,20 @@ use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
 use crate::bot::TelegramBot;
-use crate::config::DbConfig;
+use crate::config::{BackendConfig, DbConfig};
 use crate::rest_api::RestApi;
 use crate::time::today;
 use crate::visits::VisitUpdate;
 use crate::{Config, Visit, VisitStatus, Visits};
 
-#[derive(Clone)]
 pub struct BackendImpl {
     pub pool: SqlitePool,
     pub visits: Visits,
     pub tg_bot: Arc<TelegramBot<Self>>,
     pub rest_api: RestApi<Self>,
+    pub config: BackendConfig,
+    ct: CancellationToken,
+    should_reexec: AtomicBool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -59,6 +62,8 @@ pub trait Backend: Sized + Send + Sync + 'static {
         from: NaiveDate,
         to: NaiveDate,
     ) -> impl Future<Output = Result<Vec<Visit>>> + Send;
+
+    fn update(&self) -> impl Future<Output = Result<bool>> + Send;
 }
 
 fn maybe_panic(text: &str) -> Result<()> {
@@ -141,6 +146,19 @@ impl Backend for BackendImpl {
     async fn get_visits(&self, from: NaiveDate, to: NaiveDate) -> Result<Vec<Visit>> {
         self.visits.get_visits(from, to).await
     }
+
+    async fn update(&self) -> Result<bool> {
+        if !self.config.enable_update {
+            return Ok(false);
+        }
+
+        crate::selfupdate::update().await?;
+
+        self.should_reexec.store(true, Ordering::Relaxed);
+        self.ct.cancel();
+
+        Ok(true)
+    }
 }
 
 pub async fn connect_db(db_config: &DbConfig) -> Result<SqlitePool> {
@@ -162,13 +180,16 @@ impl BackendImpl {
             visits,
             tg_bot: TelegramBot::new(config.telegram_bot, backend.clone()).unwrap(),
             rest_api: RestApi::new(config.rest_api, backend.clone()),
+            config: config.backend,
+            ct: CancellationToken::new(),
+            should_reexec: false.into(),
         });
 
         Ok(backend)
     }
 
-    pub async fn run(self: Arc<Self>) -> Result<()> {
-        let ct = CancellationToken::new();
+    pub async fn run(self: Arc<Self>) -> Result<bool> {
+        let ct = self.ct.clone();
 
         let mut js = JoinSet::new();
 
@@ -185,6 +206,6 @@ impl BackendImpl {
             let _ = r?;
         }
 
-        Ok(())
+        Ok(self.should_reexec.load(Ordering::Relaxed))
     }
 }
