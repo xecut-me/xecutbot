@@ -23,6 +23,7 @@ use teloxide::{
 use crate::{
     backend::Backend,
     config::TelegramBotConfig,
+    date::{ParsedMessage, parse_message_with_date},
     visits::{Visit, VisitStatus, VisitUpdate},
 };
 use crate::{backend::Uid, utils::today};
@@ -66,33 +67,15 @@ fn strip_command(text: &str) -> &str {
     }
 }
 
-fn parse_day_purpose(text: &str) -> (NaiveDate, &str) {
-    if let Some(purpose) = text.strip_prefix("завтра") {
-        return (today() + TimeDelta::days(1), purpose.trim());
-    }
-    if let Some(purpose) = text.strip_prefix("послезавтра") {
-        return (today() + TimeDelta::days(2), purpose.trim());
-    }
+fn parse_visit_text(author: Uid, msg: &str) -> Result<VisitUpdate> {
+    let ParsedMessage { day, purpose } = parse_message_with_date(msg)?;
 
-    let Ok((date, purpose)) = NaiveDate::parse_and_remainder(text, "%Y-%m-%d") else {
-        return (today(), text.trim());
-    };
-
-    (date, purpose.trim())
-}
-
-fn parse_visit_text(author: Uid, msg: &str) -> VisitUpdate {
-    let (day, purpose) = parse_day_purpose(msg);
-    VisitUpdate {
+    Ok(VisitUpdate {
         person: author,
-        day,
-        purpose: if purpose.is_empty() {
-            None
-        } else {
-            Some(purpose.to_owned())
-        },
+        day: day.unwrap_or_else(|| today()),
+        purpose,
         status: VisitStatus::Planned,
-    }
+    })
 }
 
 fn format_close_date(date: NaiveDate) -> Option<&'static str> {
@@ -724,10 +707,6 @@ impl<B: Backend> TelegramBot<B> {
         Uid(msg.from.as_ref().expect("message to have author").id)
     }
 
-    fn parse_visit_message(msg: &Message) -> VisitUpdate {
-        parse_visit_text(Self::message_author(msg), Self::message_text(msg))
-    }
-
     fn common_modifiers(send_message: JsonRequest<SendMessage>) -> JsonRequest<SendMessage> {
         send_message
             .disable_notification(true)
@@ -763,7 +742,11 @@ impl<B: Backend> TelegramBot<B> {
     }
 
     async fn handle_plan_visit(&self, msg: &Message) -> Result<()> {
-        let visit_update = Self::parse_visit_message(msg);
+        let Ok(visit_update) = parse_visit_text(Self::message_author(msg), Self::message_text(msg))
+        else {
+            self.send_message_reply(msg, "Несуществующая дата").await?;
+            return Ok(());
+        };
 
         self.backend()
             .plan_visit(visit_update.person, visit_update.day, visit_update.purpose)
@@ -775,7 +758,11 @@ impl<B: Backend> TelegramBot<B> {
     }
 
     async fn handle_unplan_visit(&self, msg: &Message) -> Result<()> {
-        let visit_update = Self::parse_visit_message(msg);
+        let Ok(visit_update) = parse_visit_text(Self::message_author(msg), Self::message_text(msg))
+        else {
+            self.send_message_reply(msg, "Несуществующая дата").await?;
+            return Ok(());
+        };
 
         self.backend()
             .unplan_visit(visit_update.person, visit_update.day)
@@ -901,6 +888,10 @@ impl<B: Backend> TelegramBot<B> {
     }
 
     async fn handle_callback(&self, q: &CallbackQuery) -> Result<()> {
+        let msg = q
+            .regular_message()
+            .ok_or_else(|| anyhow::anyhow!("message too old"))?;
+
         let Some(data) = q.data.as_deref() else {
             return Ok(());
         };
@@ -908,12 +899,20 @@ impl<B: Backend> TelegramBot<B> {
         let author = Uid(q.from.id);
 
         if data.starts_with("/planvisit") {
-            let visit_update = parse_visit_text(author, strip_command(data));
+            let Ok(visit_update) = parse_visit_text(author, strip_command(data)) else {
+                self.send_message_reply(msg, "Неправильная дата").await?;
+                return Ok(());
+            };
+
             self.backend()
                 .plan_visit(visit_update.person, visit_update.day, visit_update.purpose)
                 .await?;
         } else if data.starts_with("/unplanvisit") {
-            let visit_update = parse_visit_text(author, strip_command(data));
+            let Ok(visit_update) = parse_visit_text(author, strip_command(data)) else {
+                self.send_message_reply(msg, "Неправильная дата").await?;
+                return Ok(());
+            };
+
             self.backend()
                 .unplan_visit(visit_update.person, visit_update.day)
                 .await?;
