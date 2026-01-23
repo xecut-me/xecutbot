@@ -2,7 +2,7 @@ use crate::utils::{now, today};
 
 use anyhow::{Result, bail};
 use chrono::{Datelike, NaiveDate, TimeDelta, Weekday};
-use regex::Regex;
+use regex::{Match, Regex};
 use std::sync::LazyLock;
 
 pub struct ParsedMessage {
@@ -11,60 +11,64 @@ pub struct ParsedMessage {
 }
 
 static RELATIVE_DAY: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^([Сс]егодня|[Зз]автра|[Пп]ослезавтра)\s*,?\s*(.*)").unwrap());
+    LazyLock::new(|| Regex::new(r"^([Сс]егодня|[Зз]автра|[Пп]ослезавтра)[\s\.,]*(\s+.*)?$").unwrap());
 
 static NEXT_WEEKDAY: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^[Вв]о?\s+((следующ..)\s+)?(понедельник|вторник|среду|четверг|пятницу|субботу|воскресенье)\s*,?\s*(.*)").unwrap()
+    Regex::new(r"^([Вв]о?\s+)?(следующ..\s+)?([Пп]о?н(едельник)?|[Вв]т(орник)?|[Сс]р(еду)?|[Чч]е?т(верг)?|[Пп]я?т(ницу)?|[Сс]у?б(боту)?|[Вв]о?ск?(ресенье)?)[\s\.,]*(\s+.*)?$").unwrap()
 });
 
 static DAY_MONTH: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^(\d{1,2})\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\s*,?\s*(.*)").unwrap()
+    Regex::new(r"^(\d{1,2})\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)[\s\.,]*(\s+.*)?$").unwrap()
 });
 
 static YMD: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^(\d{4})[-\.](\d{1,2})[-\.](\d{1,2})\s*,?\s*(.*)").unwrap());
+    LazyLock::new(|| Regex::new(r"^(\d{4})[-\.](\d{1,2})[-\.](\d{1,2})[\s\.,]*(\s+.*)?$").unwrap());
 
 static DMY: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^(\d{1,2})[-\.](\d{1,2})[-\.](\d{4})\s*,?\s*(.*)").unwrap());
+    LazyLock::new(|| Regex::new(r"^(\d{1,2})[-\.](\d{1,2})[-\.](\d{4})[\s\.,]*(\s+.*)?$").unwrap());
 
 pub fn parse_message_with_date(text: &str) -> Result<ParsedMessage> {
     if let Some(c) = RELATIVE_DAY.captures(text) {
         Ok(ParsedMessage {
             day: Some(calculate_relative_day(&c[1])),
-            purpose: none_if_empty(&c[2]),
+            purpose: parse_purpose(c.get(2)),
         })
     } else if let Some(c) = NEXT_WEEKDAY.captures(text) {
         Ok(ParsedMessage {
             day: Some(calculate_next_weekday(&c[3])),
-            purpose: none_if_empty(&c[4]),
+            purpose: parse_purpose(c.get(11)),
         })
     } else if let Some(c) = DAY_MONTH.captures(text) {
         Ok(ParsedMessage {
             day: Some(parse_day_month_date(&c[1], &c[2])?),
-            purpose: none_if_empty(&c[3]),
+            purpose: parse_purpose(c.get(3)),
         })
     } else if let Some(c) = YMD.captures(text) {
         Ok(ParsedMessage {
             day: Some(parse_ymd_date(&c[1], &c[2], &c[3])?),
-            purpose: none_if_empty(&c[4]),
+            purpose: parse_purpose(c.get(4)),
         })
     } else if let Some(c) = DMY.captures(text) {
         Ok(ParsedMessage {
             day: Some(parse_ymd_date(&c[3], &c[2], &c[1])?),
-            purpose: none_if_empty(&c[4]),
+            purpose: parse_purpose(c.get(4)),
         })
     } else {
         Ok(ParsedMessage {
             day: None,
-            purpose: none_if_empty(text),
+            purpose: if !text.trim().is_empty() {
+                Some(text.trim().to_owned())
+            } else {
+                None
+            }
         })
     }
 }
 
-fn none_if_empty(text: &str) -> Option<String> {
-    let text = text.trim();
-    if !text.is_empty() {
-        Some(text.to_owned())
+fn parse_purpose(purpose: Option<Match<'_>>) -> Option<String> {
+    let purpose = purpose?.as_str().trim();
+    if !purpose.is_empty() {
+        Some(purpose.to_owned())
     } else {
         None
     }
@@ -83,13 +87,13 @@ fn calculate_next_weekday(weekday: &str) -> NaiveDate {
     let now = now();
 
     let weekday = match weekday {
-        "понедельник" => Weekday::Mon,
-        "вторник" => Weekday::Tue,
-        "среду" => Weekday::Wed,
-        "четверг" => Weekday::Thu,
-        "пятницу" => Weekday::Fri,
-        "субботу" => Weekday::Sat,
-        "воскресенье" => Weekday::Sun,
+        "понедельник" | "пон" | "пн" => Weekday::Mon,
+        "вторник" | "вт" => Weekday::Tue,
+        "среду" | "ср" => Weekday::Wed,
+        "четверг" | "чет" | "чт" => Weekday::Thu,
+        "пятницу" | "пят" | "пт" => Weekday::Fri,
+        "субботу" | "суб" | "сб" => Weekday::Sat,
+        "воскресенье" | "вс" | "вск" | "вос" | "воск" => Weekday::Sun,
         _ => unreachable!("invalid word `{weekday}`"),
     };
 
@@ -296,6 +300,54 @@ mod tests {
             ("в следующую среду   ,     ", (next_weekday_date(Weekday::Wed), None)),
             ("В следующий четверг           тусить", (next_weekday_date(Weekday::Thu), Some("тусить"))),
             ("в следующую пятницу  , Собирать принтер", (next_weekday_date(Weekday::Fri), Some("Собирать принтер"))),
+
+            ("пон", (next_weekday_date(Weekday::Mon), None)),
+            ("пн", (next_weekday_date(Weekday::Mon), None)),
+            ("вт", (next_weekday_date(Weekday::Tue), None)),
+            ("ср", (next_weekday_date(Weekday::Wed), None)),
+            ("чет", (next_weekday_date(Weekday::Thu), None)),
+            ("чт", (next_weekday_date(Weekday::Thu), None)),
+            ("пят", (next_weekday_date(Weekday::Fri), None)),
+            ("пт", (next_weekday_date(Weekday::Fri), None)),
+            ("суб", (next_weekday_date(Weekday::Sat), None)),
+            ("сб", (next_weekday_date(Weekday::Sat), None)),
+            ("вс", (next_weekday_date(Weekday::Sun), None)),
+            ("вск", (next_weekday_date(Weekday::Sun), None)),
+            ("вос", (next_weekday_date(Weekday::Sun), None)),
+            ("воск", (next_weekday_date(Weekday::Sun), None)),
+
+            ("в пн", (next_weekday_date(Weekday::Mon), None)),
+            ("во вт", (next_weekday_date(Weekday::Tue), None)),
+            ("в ср", (next_weekday_date(Weekday::Wed), None)),
+            ("В чт", (next_weekday_date(Weekday::Thu), None)),
+            ("в пт", (next_weekday_date(Weekday::Fri), None)),
+            ("В сб", (next_weekday_date(Weekday::Sat), None)),
+            ("в вс", (next_weekday_date(Weekday::Sun), None)),
+            ("во вск", (next_weekday_date(Weekday::Sun), None)),
+            ("В вос", (next_weekday_date(Weekday::Sun), None)),
+            ("в воск", (next_weekday_date(Weekday::Sun), None)),
+
+            ("в следующий пн", (next_weekday_date(Weekday::Mon), None)),
+            ("во следующий вт", (next_weekday_date(Weekday::Tue), None)),
+            ("в следующую ср", (next_weekday_date(Weekday::Wed), None)),
+            ("В следующий чт", (next_weekday_date(Weekday::Thu), None)),
+            ("в следующую пт", (next_weekday_date(Weekday::Fri), None)),
+            ("В следующую сб", (next_weekday_date(Weekday::Sat), None)),
+            ("в следующий вс", (next_weekday_date(Weekday::Sun), None)),
+            ("во следующий вск", (next_weekday_date(Weekday::Sun), None)),
+            ("В следующий вос", (next_weekday_date(Weekday::Sun), None)),
+            ("в следующий воск", (next_weekday_date(Weekday::Sun), None)),
+
+            ("пн, делать глупости", (next_weekday_date(Weekday::Mon), Some("делать глупости"))),
+            ("вт тусить", (next_weekday_date(Weekday::Tue), Some("тусить"))),
+            ("в ср   ,     ", (next_weekday_date(Weekday::Wed), None)),
+            ("В чт           Собирать принтер", (next_weekday_date(Weekday::Thu), Some("Собирать принтер"))),
+            ("в пт  , ловить спутники", (next_weekday_date(Weekday::Fri), Some("ловить спутники"))),
+            ("В сб ломать жопы", (next_weekday_date(Weekday::Sat), Some("ломать жопы"))),
+            ("в вс паять платы", (next_weekday_date(Weekday::Sun), Some("паять платы"))),
+            ("во вск, делать глупости", (next_weekday_date(Weekday::Sun), Some("делать глупости"))),
+            ("В вос тусить", (next_weekday_date(Weekday::Sun), Some("тусить"))),
+            ("в воск Собирать принтер", (next_weekday_date(Weekday::Sun), Some("Собирать принтер"))),
         ]);
 
         for (input, (expected_day, expected_purpose)) in test_cases {
@@ -447,6 +499,8 @@ mod tests {
             ("встреча завтра но не сегодня", (None, Some("встреча завтра но не сегодня"))),
             ("10/01/2026", (None, Some("10/01/2026"))),
             ("9 лепня 2026", (None, Some("9 лепня 2026"))),
+            ("Сегодняшний вечер перестаёт быть томным", (None, Some("Сегодняшний вечер перестаёт быть томным"))),
+            ("Воскресный день", (None, Some("Воскресный день"))),
         ]);
 
         for (input, (expected_day, expected_purpose)) in test_cases {
