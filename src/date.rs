@@ -10,10 +10,8 @@ pub struct ParsedMessage {
     pub purpose: Option<String>,
 }
 
-static TOMORROW: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[Зз]автра\s*,?\s*(.*)").unwrap());
-
-static DAY_AFTER_TOMORROW: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^[Пп]ослезавтра\s*,?\s*(.*)").unwrap());
+static RELATIVE_DAY: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^([Сс]егодня|[Зз]автра|[Пп]ослезавтра)\s*,?\s*(.*)").unwrap());
 
 static NEXT_WEEKDAY: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^[Вв]о?\s+((следующ..)\s+)?(понедельник|вторник|среду|четверг|пятницу|субботу|воскресенье)\s*,?\s*(.*)").unwrap()
@@ -30,15 +28,10 @@ static DMY: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^(\d{1,2})[-\.](\d{1,2})[-\.](\d{4})\s*,?\s*(.*)").unwrap());
 
 pub fn parse_message_with_date(text: &str) -> Result<ParsedMessage> {
-    if let Some(c) = TOMORROW.captures(text) {
+    if let Some(c) = RELATIVE_DAY.captures(text) {
         Ok(ParsedMessage {
-            day: Some(today() + TimeDelta::days(1)),
-            purpose: none_if_empty(&c[1]),
-        })
-    } else if let Some(c) = DAY_AFTER_TOMORROW.captures(text) {
-        Ok(ParsedMessage {
-            day: Some(today() + TimeDelta::days(2)),
-            purpose: none_if_empty(&c[1]),
+            day: Some(calculate_relative_day(&c[1])),
+            purpose: none_if_empty(&c[2]),
         })
     } else if let Some(c) = NEXT_WEEKDAY.captures(text) {
         Ok(ParsedMessage {
@@ -77,6 +70,15 @@ fn none_if_empty(text: &str) -> Option<String> {
     }
 }
 
+fn calculate_relative_day(relative_day: &str) -> NaiveDate {
+    match relative_day.to_lowercase().as_str() {
+        "сегодня" => today(),
+        "завтра" => today() + TimeDelta::days(1),
+        "послезавтра" => today() + TimeDelta::days(2),
+        _ => unreachable!("invalid word `{relative_day}`"),
+    }
+}
+
 fn calculate_next_weekday(weekday: &str) -> NaiveDate {
     let now = now();
 
@@ -88,7 +90,7 @@ fn calculate_next_weekday(weekday: &str) -> NaiveDate {
         "пятницу" => Weekday::Fri,
         "субботу" => Weekday::Sat,
         "воскресенье" => Weekday::Sun,
-        _ => unreachable!(),
+        _ => unreachable!("invalid word `{weekday}`"),
     };
 
     let days = now.weekday().days_since(weekday);
@@ -119,7 +121,7 @@ fn parse_day_month_date(day: &str, month: &str) -> Result<NaiveDate> {
         "октября" => 10,
         "ноября" => 11,
         "декабря" => 12,
-        _ => unreachable!(),
+        _ => unreachable!("invalid word `{month}`"),
     };
 
     let year = if month <= now.month() && day < now.day() {
@@ -177,6 +179,34 @@ mod tests {
             now.year()
         };
         NaiveDate::from_ymd_opt(year, month, day).unwrap()
+    }
+
+    #[test]
+    fn today_() {
+        let today = today();
+
+        #[rustfmt::skip]
+        let test_cases = HashMap::from([
+            ("сегодня", (Some(today), None)),
+            ("сегодня", (Some(today), None)),
+            ("сегодня, паять паяльником", (Some(today), Some("паять паяльником"))),
+            ("сегодня, паять паяльником", (Some(today), Some("паять паяльником"))),
+            ("сегодня паять паяльником", (Some(today), Some("паять паяльником"))),
+            ("сегодня паять паяльником", (Some(today), Some("паять паяльником"))),
+            ("сегодня   ,     ", (Some(today), None)),
+            ("сегодня           не знаю", (Some(today), Some("не знаю"))),
+            ("сегодня  ,  Думу думать", (Some(today), Some("Думу думать"))),
+        ]);
+
+        for (input, (expected_day, expected_purpose)) in test_cases {
+            let result = parse_message_with_date(input).unwrap();
+            assert_eq!(result.day, expected_day, "Test case: `{input}`");
+            assert_eq!(
+                result.purpose.as_deref(),
+                expected_purpose,
+                "Test case: `{input}`"
+            );
+        }
     }
 
     #[test]
