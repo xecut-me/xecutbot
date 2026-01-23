@@ -10,11 +10,12 @@ pub struct ParsedMessage {
     pub purpose: Option<String>,
 }
 
-static RELATIVE_DAY: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^([Сс]егодня|[Зз]автра|[Пп]ослезавтра)[\s\.,]*(\s+.*)?$").unwrap());
+static RELATIVE_DAY: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^([Сс]егодня|[Зз]автра|[Пп]ослезавтра)[\s\.,]*(\s+.*)?$").unwrap()
+});
 
 static NEXT_WEEKDAY: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^([Вв]о?\s+)?(следующ..\s+)?([Пп]о?н(едельник)?|[Вв]т(орник)?|[Сс]р(еду)?|[Чч]е?т(верг)?|[Пп]я?т(ницу)?|[Сс]у?б(боту)?|[Вв]о?ск?(ресенье)?)[\s\.,]*(\s+.*)?$").unwrap()
+    Regex::new(r"^([Вв]о?\s+)?(след(ующ..)?\s+)?([Пп]о?н(едельник)?|[Вв]т(орник)?|[Сс]р(еду)?|[Чч]е?т(верг)?|[Пп]я?т(ницу)?|[Сс]у?б(боту)?|[Вв]о?ск?(ресенье)?)[\s\.,]*(\s+.*)?$").unwrap()
 });
 
 static DAY_MONTH: LazyLock<Regex> = LazyLock::new(|| {
@@ -35,8 +36,8 @@ pub fn parse_message_with_date(text: &str) -> Result<ParsedMessage> {
         })
     } else if let Some(c) = NEXT_WEEKDAY.captures(text) {
         Ok(ParsedMessage {
-            day: Some(calculate_next_weekday(&c[3])),
-            purpose: parse_purpose(c.get(11)),
+            day: Some(calculate_next_weekday(&c[4])),
+            purpose: parse_purpose(c.get(12)),
         })
     } else if let Some(c) = DAY_MONTH.captures(text) {
         Ok(ParsedMessage {
@@ -60,7 +61,7 @@ pub fn parse_message_with_date(text: &str) -> Result<ParsedMessage> {
                 Some(text.trim().to_owned())
             } else {
                 None
-            }
+            },
         })
     }
 }
@@ -348,6 +349,9 @@ mod tests {
             ("во вск, делать глупости", (next_weekday_date(Weekday::Sun), Some("делать глупости"))),
             ("В вос тусить", (next_weekday_date(Weekday::Sun), Some("тусить"))),
             ("в воск Собирать принтер", (next_weekday_date(Weekday::Sun), Some("Собирать принтер"))),
+        
+            ("в след сб", (next_weekday_date(Weekday::Sat), None)),
+            ("в след вс", (next_weekday_date(Weekday::Sun), None)),
         ]);
 
         for (input, (expected_day, expected_purpose)) in test_cases {
