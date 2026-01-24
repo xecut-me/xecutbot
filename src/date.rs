@@ -1,6 +1,6 @@
 use anyhow::{Result, bail};
 use chrono::{Datelike, NaiveDate, TimeDelta, Weekday};
-use regex::{Match, Regex};
+use regex::{Match, Regex, RegexBuilder};
 use std::sync::LazyLock;
 
 pub struct ParsedMessage {
@@ -8,23 +8,24 @@ pub struct ParsedMessage {
     pub purpose: Option<String>,
 }
 
-static RELATIVE_DAY: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^([Сс]егодня|[Зз]автра|[Пп]ослезавтра)[\s\.,]*(\s+.*)?$").unwrap()
-});
+static RELATIVE_DAY: LazyLock<Regex> =
+    LazyLock::new(|| regex(r"^(сегодня|завтра|послезавтра)[\s\.,]*(\s+.*)?$"));
 
 static NEXT_WEEKDAY: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^([Вв]о?\s+)?(след(ующ..)?\s+)?([Пп]о?н(едельник)?|[Вв]т(орник)?|[Сс]р(еду)?|[Чч]е?т(верг)?|[Пп]я?т(ницу)?|[Сс]у?б(боту)?|[Вв]о?ск?(ресенье)?)[\s\.,]*(\s+.*)?$").unwrap()
+    regex(r"^(во?\s+)?(след(ующ..)?\s+)?(по?н(едельник)?|[Вв]т(орник)?|ср(еду)?|че?т(верг)?|пя?т(ницу)?|су?б(боту)?|во?ск?(ресенье)?)[\s\.,]*(\s+.*)?$")
 });
 
 static DAY_MONTH: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^(\d{1,2})\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)[\s\.,]*(\s+.*)?$").unwrap()
+    regex(
+        r"^(\d{1,2})\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)[\s\.,]*(\s+.*)?$",
+    )
 });
 
 static YMD: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^(\d{4})[-\.](\d{1,2})[-\.](\d{1,2})[\s\.,]*(\s+.*)?$").unwrap());
+    LazyLock::new(|| regex(r"^(\d{4})[-\.](\d{1,2})[-\.](\d{1,2})[\s\.,]*(\s+.*)?$"));
 
 static DMY: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^(\d{1,2})[-\.](\d{1,2})[-\.](\d{4})[\s\.,]*(\s+.*)?$").unwrap());
+    LazyLock::new(|| regex(r"^(\d{1,2})[-\.](\d{1,2})[-\.](\d{4})[\s\.,]*(\s+.*)?$"));
 
 pub fn parse_message_with_date(base_date: NaiveDate, text: &str) -> Result<ParsedMessage> {
     if let Some(c) = RELATIVE_DAY.captures(text) {
@@ -64,13 +65,12 @@ pub fn parse_message_with_date(base_date: NaiveDate, text: &str) -> Result<Parse
     }
 }
 
-fn parse_purpose(purpose: Option<Match<'_>>) -> Option<String> {
-    let purpose = purpose?.as_str().trim();
-    if !purpose.is_empty() {
-        Some(purpose.to_owned())
-    } else {
-        None
-    }
+fn regex(pattern: &str) -> Regex {
+    RegexBuilder::new(pattern)
+        .unicode(true)
+        .case_insensitive(true)
+        .build()
+        .expect("pattern should be valid")
 }
 
 fn calculate_relative_day(base_date: NaiveDate, relative_day: &str) -> NaiveDate {
@@ -97,15 +97,17 @@ fn calculate_next_weekday(base_date: NaiveDate, weekday: &str) -> NaiveDate {
     let current_weekday = base_date.weekday().number_from_monday();
     let target_weekday = target_weekday.number_from_monday();
 
-    let days = if current_weekday == target_weekday{
+    let days = if current_weekday == target_weekday {
         7
-    }else if current_weekday < target_weekday {
+    } else if current_weekday < target_weekday {
         target_weekday - current_weekday
     } else {
         7 - current_weekday + target_weekday
     };
 
-    println!("current_weekday = {current_weekday}, target_weekday = {target_weekday}, diff = {days}");
+    println!(
+        "current_weekday = {current_weekday}, target_weekday = {target_weekday}, diff = {days}"
+    );
 
     base_date + TimeDelta::days(days.into())
 }
@@ -152,6 +154,15 @@ fn parse_ymd_date(base_date: NaiveDate, year: &str, month: &str, day: &str) -> R
     }
 
     Ok(date)
+}
+
+fn parse_purpose(purpose: Option<Match<'_>>) -> Option<String> {
+    let purpose = purpose?.as_str().trim();
+    if !purpose.is_empty() {
+        Some(purpose.to_owned())
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
