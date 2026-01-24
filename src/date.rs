@@ -12,7 +12,9 @@ static RELATIVE_DAY: LazyLock<Regex> =
     LazyLock::new(|| regex(r"^(сегодня|завтра|послезавтра)[\s\.,]*(\s+.*)?$"));
 
 static NEXT_WEEKDAY: LazyLock<Regex> = LazyLock::new(|| {
-    regex(r"^(во?\s+)?(след(ующ..)?\s+)?(по?н(едельник)?|[Вв]т(орник)?|ср(еду)?|че?т(верг)?|пя?т(ницу)?|су?б(боту)?|во?ск?(ресенье)?)[\s\.,]*(\s+.*)?$")
+    regex(
+        r"^(во?\s+)?(след(ующ..)?\s+)?(по?н(едельник)?|[Вв]т(орник)?|ср(еду)?|че?т(верг)?|пя?т(ницу)?|су?б(боту)?|во?ск?(ресенье)?)[\s\.,]*(\s+.*)?$",
+    )
 });
 
 static DAY_MONTH: LazyLock<Regex> = LazyLock::new(|| {
@@ -104,10 +106,6 @@ fn calculate_next_weekday(base_date: NaiveDate, weekday: &str) -> NaiveDate {
     } else {
         7 - current_weekday + target_weekday
     };
-
-    println!(
-        "current_weekday = {current_weekday}, target_weekday = {target_weekday}, diff = {days}"
-    );
 
     base_date + TimeDelta::days(days.into())
 }

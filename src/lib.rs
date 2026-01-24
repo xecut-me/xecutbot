@@ -1,10 +1,10 @@
 pub mod backend;
 pub mod bot;
 pub mod config;
+pub mod date;
 pub mod rest_api;
 pub mod utils;
 pub mod visits;
-pub mod date;
 
 pub use bot::TelegramBot;
 pub use config::Config;
