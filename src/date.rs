@@ -1,5 +1,3 @@
-use crate::utils::{now, today};
-
 use anyhow::{Result, bail};
 use chrono::{Datelike, NaiveDate, TimeDelta, Weekday};
 use regex::{Match, Regex};
@@ -28,30 +26,30 @@ static YMD: LazyLock<Regex> =
 static DMY: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^(\d{1,2})[-\.](\d{1,2})[-\.](\d{4})[\s\.,]*(\s+.*)?$").unwrap());
 
-pub fn parse_message_with_date(text: &str) -> Result<ParsedMessage> {
+pub fn parse_message_with_date(base_date: NaiveDate, text: &str) -> Result<ParsedMessage> {
     if let Some(c) = RELATIVE_DAY.captures(text) {
         Ok(ParsedMessage {
-            day: Some(calculate_relative_day(&c[1])),
+            day: Some(calculate_relative_day(base_date, &c[1])),
             purpose: parse_purpose(c.get(2)),
         })
     } else if let Some(c) = NEXT_WEEKDAY.captures(text) {
         Ok(ParsedMessage {
-            day: Some(calculate_next_weekday(&c[4])),
+            day: Some(calculate_next_weekday(base_date, &c[4])),
             purpose: parse_purpose(c.get(12)),
         })
     } else if let Some(c) = DAY_MONTH.captures(text) {
         Ok(ParsedMessage {
-            day: Some(parse_day_month_date(&c[1], &c[2])?),
+            day: Some(parse_day_month_date(base_date, &c[1], &c[2])?),
             purpose: parse_purpose(c.get(3)),
         })
     } else if let Some(c) = YMD.captures(text) {
         Ok(ParsedMessage {
-            day: Some(parse_ymd_date(&c[1], &c[2], &c[3])?),
+            day: Some(parse_ymd_date(base_date, &c[1], &c[2], &c[3])?),
             purpose: parse_purpose(c.get(4)),
         })
     } else if let Some(c) = DMY.captures(text) {
         Ok(ParsedMessage {
-            day: Some(parse_ymd_date(&c[3], &c[2], &c[1])?),
+            day: Some(parse_ymd_date(base_date, &c[3], &c[2], &c[1])?),
             purpose: parse_purpose(c.get(4)),
         })
     } else {
@@ -75,19 +73,17 @@ fn parse_purpose(purpose: Option<Match<'_>>) -> Option<String> {
     }
 }
 
-fn calculate_relative_day(relative_day: &str) -> NaiveDate {
+fn calculate_relative_day(base_date: NaiveDate, relative_day: &str) -> NaiveDate {
     match relative_day.to_lowercase().as_str() {
-        "сегодня" => today(),
-        "завтра" => today() + TimeDelta::days(1),
-        "послезавтра" => today() + TimeDelta::days(2),
+        "сегодня" => base_date,
+        "завтра" => base_date + TimeDelta::days(1),
+        "послезавтра" => base_date + TimeDelta::days(2),
         _ => unreachable!("invalid word `{relative_day}`"),
     }
 }
 
-fn calculate_next_weekday(weekday: &str) -> NaiveDate {
-    let now = now();
-
-    let weekday = match weekday {
+fn calculate_next_weekday(base_date: NaiveDate, weekday: &str) -> NaiveDate {
+    let target_weekday = match weekday {
         "понедельник" | "пон" | "пн" => Weekday::Mon,
         "вторник" | "вт" => Weekday::Tue,
         "среду" | "ср" => Weekday::Wed,
@@ -98,19 +94,23 @@ fn calculate_next_weekday(weekday: &str) -> NaiveDate {
         _ => unreachable!("invalid word `{weekday}`"),
     };
 
-    let days = now.weekday().days_since(weekday);
-    let date = if days == 0 {
-        now + TimeDelta::weeks(1)
+    let current_weekday = base_date.weekday().number_from_monday();
+    let target_weekday = target_weekday.number_from_monday();
+
+    let days = if current_weekday == target_weekday{
+        7
+    }else if current_weekday < target_weekday {
+        target_weekday - current_weekday
     } else {
-        now + TimeDelta::days(days.into())
+        7 - current_weekday + target_weekday
     };
 
-    date.date_naive()
+    println!("current_weekday = {current_weekday}, target_weekday = {target_weekday}, diff = {days}");
+
+    base_date + TimeDelta::days(days.into())
 }
 
-fn parse_day_month_date(day: &str, month: &str) -> Result<NaiveDate> {
-    let now = now();
-
+fn parse_day_month_date(base_date: NaiveDate, day: &str, month: &str) -> Result<NaiveDate> {
     let day = day.parse().unwrap();
 
     let month = match month {
@@ -129,19 +129,17 @@ fn parse_day_month_date(day: &str, month: &str) -> Result<NaiveDate> {
         _ => unreachable!("invalid word `{month}`"),
     };
 
-    let year = if month <= now.month() && day < now.day() {
-        now.year() + 1
+    let year = if month <= base_date.month() && day < base_date.day() {
+        base_date.year() + 1
     } else {
-        now.year()
+        base_date.year()
     };
 
     NaiveDate::from_ymd_opt(year, month, day)
         .ok_or_else(|| anyhow::anyhow!("invalid date: {}-{}-{}", year, month, day))
 }
 
-fn parse_ymd_date(year: &str, month: &str, day: &str) -> Result<NaiveDate> {
-    let now = today();
-
+fn parse_ymd_date(base_date: NaiveDate, year: &str, month: &str, day: &str) -> Result<NaiveDate> {
     let year = year.parse().unwrap();
     let month = month.parse().unwrap();
     let day = day.parse().unwrap();
@@ -149,7 +147,7 @@ fn parse_ymd_date(year: &str, month: &str, day: &str) -> Result<NaiveDate> {
     let date = NaiveDate::from_ymd_opt(year, month, day)
         .ok_or_else(|| anyhow::anyhow!("invalid date: {}-{}-{}", year, month, day))?;
 
-    if date < now {
+    if date < base_date {
         bail!("date cannot be in the past");
     }
 
@@ -161,34 +159,9 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
-    fn ymd(y: i32, m: u32, d: u32) -> Option<NaiveDate> {
-        Some(NaiveDate::from_ymd_opt(y, m, d).unwrap())
-    }
-
-    fn next_weekday_date(weekday: Weekday) -> NaiveDate {
-        let now = now();
-        let days = now.weekday().days_since(weekday);
-        let date = if days == 0 {
-            now + TimeDelta::weeks(1)
-        } else {
-            now + TimeDelta::days(days.into())
-        };
-        date.date_naive()
-    }
-
-    fn day_month_date(day: u32, month: u32) -> NaiveDate {
-        let now = now();
-        let year = if month <= now.month() && day < now.day() {
-            now.year() + 1
-        } else {
-            now.year()
-        };
-        NaiveDate::from_ymd_opt(year, month, day).unwrap()
-    }
-
     #[test]
     fn today_() {
-        let today = today();
+        let today = NaiveDate::from_ymd_opt(2026, 01, 24).unwrap();
 
         #[rustfmt::skip]
         let test_cases = HashMap::from([
@@ -204,7 +177,7 @@ mod tests {
         ]);
 
         for (input, (expected_day, expected_purpose)) in test_cases {
-            let result = parse_message_with_date(input).unwrap();
+            let result = parse_message_with_date(today, input).unwrap();
             assert_eq!(result.day, expected_day, "Test case: `{input}`");
             assert_eq!(
                 result.purpose.as_deref(),
@@ -216,23 +189,24 @@ mod tests {
 
     #[test]
     fn tomorrow() {
-        let tomorrow_date = today() + TimeDelta::days(1);
+        let today = NaiveDate::from_ymd_opt(2026, 01, 24).unwrap();
+        let tomorrow = NaiveDate::from_ymd_opt(2026, 01, 25).unwrap();
 
         #[rustfmt::skip]
         let test_cases = HashMap::from([
-            ("завтра", (Some(tomorrow_date), None)),
-            ("Завтра", (Some(tomorrow_date), None)),
-            ("завтра, громить спейс", (Some(tomorrow_date), Some("громить спейс"))),
-            ("Завтра, громить спейс", (Some(tomorrow_date), Some("громить спейс"))),
-            ("завтра громить спейс", (Some(tomorrow_date), Some("громить спейс"))),
-            ("Завтра громить спейс", (Some(tomorrow_date), Some("громить спейс"))),
-            ("завтра   ,     ", (Some(tomorrow_date), None)),
-            ("завтра           не знаю", (Some(tomorrow_date), Some("не знаю"))),
-            ("Завтра  , Децентрализироваться", (Some(tomorrow_date), Some("Децентрализироваться"))),
+            ("завтра", (Some(tomorrow), None)),
+            ("Завтра", (Some(tomorrow), None)),
+            ("завтра, громить спейс", (Some(tomorrow), Some("громить спейс"))),
+            ("Завтра, громить спейс", (Some(tomorrow), Some("громить спейс"))),
+            ("завтра громить спейс", (Some(tomorrow), Some("громить спейс"))),
+            ("Завтра громить спейс", (Some(tomorrow), Some("громить спейс"))),
+            ("завтра   ,     ", (Some(tomorrow), None)),
+            ("завтра           не знаю", (Some(tomorrow), Some("не знаю"))),
+            ("Завтра  , Децентрализироваться", (Some(tomorrow), Some("Децентрализироваться"))),
         ]);
 
         for (input, (expected_day, expected_purpose)) in test_cases {
-            let result = parse_message_with_date(input).unwrap();
+            let result = parse_message_with_date(today, input).unwrap();
             assert_eq!(result.day, expected_day, "Test case: `{input}`");
             assert_eq!(
                 result.purpose.as_deref(),
@@ -244,23 +218,24 @@ mod tests {
 
     #[test]
     fn day_after_tomorrow() {
-        let day_after_tomorrow_date = today() + TimeDelta::days(2);
+        let today = NaiveDate::from_ymd_opt(2026, 01, 24).unwrap();
+        let day_after_tomorrow = NaiveDate::from_ymd_opt(2026, 01, 26).unwrap();
 
         #[rustfmt::skip]
         let test_cases = HashMap::from([
-            ("послезавтра", (Some(day_after_tomorrow_date), None)),
-            ("Послезавтра", (Some(day_after_tomorrow_date), None)),
-            ("послезавтра, паять паяльником", (Some(day_after_tomorrow_date), Some("паять паяльником"))),
-            ("Послезавтра, паять паяльником", (Some(day_after_tomorrow_date), Some("паять паяльником"))),
-            ("послезавтра паять паяльником", (Some(day_after_tomorrow_date), Some("паять паяльником"))),
-            ("Послезавтра паять паяльником", (Some(day_after_tomorrow_date), Some("паять паяльником"))),
-            ("послезавтра   ,     ", (Some(day_after_tomorrow_date), None)),
-            ("послезавтра           не знаю", (Some(day_after_tomorrow_date), Some("не знаю"))),
-            ("Послезавтра  ,  Думу думать", (Some(day_after_tomorrow_date), Some("Думу думать"))),
+            ("послезавтра", (Some(day_after_tomorrow), None)),
+            ("Послезавтра", (Some(day_after_tomorrow), None)),
+            ("послезавтра, паять паяльником", (Some(day_after_tomorrow), Some("паять паяльником"))),
+            ("Послезавтра, паять паяльником", (Some(day_after_tomorrow), Some("паять паяльником"))),
+            ("послезавтра паять паяльником", (Some(day_after_tomorrow), Some("паять паяльником"))),
+            ("Послезавтра паять паяльником", (Some(day_after_tomorrow), Some("паять паяльником"))),
+            ("послезавтра   ,     ", (Some(day_after_tomorrow), None)),
+            ("послезавтра           не знаю", (Some(day_after_tomorrow), Some("не знаю"))),
+            ("Послезавтра  ,  Думу думать", (Some(day_after_tomorrow), Some("Думу думать"))),
         ]);
 
         for (input, (expected_day, expected_purpose)) in test_cases {
-            let result = parse_message_with_date(input).unwrap();
+            let result = parse_message_with_date(today, input).unwrap();
             assert_eq!(result.day, expected_day, "Test case: `{input}`");
             assert_eq!(
                 result.purpose.as_deref(),
@@ -272,90 +247,100 @@ mod tests {
 
     #[test]
     fn next_weekday() {
+        let today = NaiveDate::from_ymd_opt(2026, 1, 24).unwrap();
+
+        let next_sunday = NaiveDate::from_ymd_opt(2026, 1, 25).unwrap();
+        let next_monday = NaiveDate::from_ymd_opt(2026, 1, 26).unwrap();
+        let next_tuesday = NaiveDate::from_ymd_opt(2026, 1, 27).unwrap();
+        let next_wednesday = NaiveDate::from_ymd_opt(2026, 1, 28).unwrap();
+        let next_thursday = NaiveDate::from_ymd_opt(2026, 1, 29).unwrap();
+        let next_friday = NaiveDate::from_ymd_opt(2026, 1, 30).unwrap();
+        let next_saturday = NaiveDate::from_ymd_opt(2026, 1, 31).unwrap();
+
         #[rustfmt::skip]
         let test_cases = HashMap::from([
-            ("в понедельник", (next_weekday_date(Weekday::Mon), None)),
-            ("во вторник",    (next_weekday_date(Weekday::Tue), None)),
-            ("в среду",       (next_weekday_date(Weekday::Wed), None)),
-            ("В четверг",     (next_weekday_date(Weekday::Thu), None)),
-            ("в пятницу",     (next_weekday_date(Weekday::Fri), None)),
-            ("В субботу",     (next_weekday_date(Weekday::Sat), None)),
-            ("В воскресенье", (next_weekday_date(Weekday::Sun), None)),
+            ("в понедельник", (next_monday, None)),
+            ("во вторник",    (next_tuesday, None)),
+            ("в среду",       (next_wednesday, None)),
+            ("В четверг",     (next_thursday, None)),
+            ("в пятницу",     (next_friday, None)),
+            ("В субботу",     (next_saturday, None)),
+            ("В воскресенье", (next_sunday, None)),
 
-            ("в понедельник, делать глупости", (next_weekday_date(Weekday::Mon), Some("делать глупости"))),
-            ("во вторник делать глупости", (next_weekday_date(Weekday::Tue), Some("делать глупости"))),
-            ("в среду   ,     ", (next_weekday_date(Weekday::Wed), None)),
-            ("В четверг           тусить", (next_weekday_date(Weekday::Thu), Some("тусить"))),
-            ("в пятницу  , Собирать принтер", (next_weekday_date(Weekday::Fri), Some("Собирать принтер"))),
+            ("в понедельник, делать глупости", (next_monday, Some("делать глупости"))),
+            ("во вторник делать глупости", (next_tuesday, Some("делать глупости"))),
+            ("в среду   ,     ", (next_wednesday, None)),
+            ("В четверг           тусить", (next_thursday, Some("тусить"))),
+            ("в пятницу  , Собирать принтер", (next_friday, Some("Собирать принтер"))),
 
-            ("В следующий понедельник", (next_weekday_date(Weekday::Mon), None)),
-            ("Во следующий вторник",    (next_weekday_date(Weekday::Tue), None)),
-            ("В следующую среду",       (next_weekday_date(Weekday::Wed), None)),
-            ("В следующий четверг",     (next_weekday_date(Weekday::Thu), None)),
-            ("в следующую пятницу",     (next_weekday_date(Weekday::Fri), None)),
-            ("в следующую субботу",     (next_weekday_date(Weekday::Sat), None)),
-            ("В следующее воскресенье", (next_weekday_date(Weekday::Sun), None)),
+            ("В следующий понедельник", (next_monday, None)),
+            ("Во следующий вторник",    (next_tuesday, None)),
+            ("В следующую среду",       (next_wednesday, None)),
+            ("В следующий четверг",     (next_thursday, None)),
+            ("в следующую пятницу",     (next_friday, None)),
+            ("в следующую субботу",     (next_saturday, None)),
+            ("В следующее воскресенье", (next_sunday, None)),
 
-            ("в следующий понедельник, делать глупости", (next_weekday_date(Weekday::Mon), Some("делать глупости"))),
-            ("во следующий вторник делать глупости", (next_weekday_date(Weekday::Tue), Some("делать глупости"))),
-            ("в следующую среду   ,     ", (next_weekday_date(Weekday::Wed), None)),
-            ("В следующий четверг           тусить", (next_weekday_date(Weekday::Thu), Some("тусить"))),
-            ("в следующую пятницу  , Собирать принтер", (next_weekday_date(Weekday::Fri), Some("Собирать принтер"))),
+            ("в следующий понедельник, делать глупости", (next_monday, Some("делать глупости"))),
+            ("во следующий вторник делать глупости", (next_tuesday, Some("делать глупости"))),
+            ("в следующую среду   ,     ", (next_wednesday, None)),
+            ("В следующий четверг           тусить", (next_thursday, Some("тусить"))),
+            ("в следующую пятницу  , Собирать принтер", (next_friday, Some("Собирать принтер"))),
 
-            ("пон", (next_weekday_date(Weekday::Mon), None)),
-            ("пн", (next_weekday_date(Weekday::Mon), None)),
-            ("вт", (next_weekday_date(Weekday::Tue), None)),
-            ("ср", (next_weekday_date(Weekday::Wed), None)),
-            ("чет", (next_weekday_date(Weekday::Thu), None)),
-            ("чт", (next_weekday_date(Weekday::Thu), None)),
-            ("пят", (next_weekday_date(Weekday::Fri), None)),
-            ("пт", (next_weekday_date(Weekday::Fri), None)),
-            ("суб", (next_weekday_date(Weekday::Sat), None)),
-            ("сб", (next_weekday_date(Weekday::Sat), None)),
-            ("вс", (next_weekday_date(Weekday::Sun), None)),
-            ("вск", (next_weekday_date(Weekday::Sun), None)),
-            ("вос", (next_weekday_date(Weekday::Sun), None)),
-            ("воск", (next_weekday_date(Weekday::Sun), None)),
+            ("пон", (next_monday, None)),
+            ("пн", (next_monday, None)),
+            ("вт", (next_tuesday, None)),
+            ("ср", (next_wednesday, None)),
+            ("чет", (next_thursday, None)),
+            ("чт", (next_thursday, None)),
+            ("пят", (next_friday, None)),
+            ("пт", (next_friday, None)),
+            ("суб", (next_saturday, None)),
+            ("сб", (next_saturday, None)),
+            ("вс", (next_sunday, None)),
+            ("вск", (next_sunday, None)),
+            ("вос", (next_sunday, None)),
+            ("воск", (next_sunday, None)),
 
-            ("в пн", (next_weekday_date(Weekday::Mon), None)),
-            ("во вт", (next_weekday_date(Weekday::Tue), None)),
-            ("в ср", (next_weekday_date(Weekday::Wed), None)),
-            ("В чт", (next_weekday_date(Weekday::Thu), None)),
-            ("в пт", (next_weekday_date(Weekday::Fri), None)),
-            ("В сб", (next_weekday_date(Weekday::Sat), None)),
-            ("в вс", (next_weekday_date(Weekday::Sun), None)),
-            ("во вск", (next_weekday_date(Weekday::Sun), None)),
-            ("В вос", (next_weekday_date(Weekday::Sun), None)),
-            ("в воск", (next_weekday_date(Weekday::Sun), None)),
+            ("в пн", (next_monday, None)),
+            ("во вт", (next_tuesday, None)),
+            ("в ср", (next_wednesday, None)),
+            ("В чт", (next_thursday, None)),
+            ("в пт", (next_friday, None)),
+            ("В сб", (next_saturday, None)),
+            ("в вс", (next_sunday, None)),
+            ("во вск", (next_sunday, None)),
+            ("В вос", (next_sunday, None)),
+            ("в воск", (next_sunday, None)),
 
-            ("в следующий пн", (next_weekday_date(Weekday::Mon), None)),
-            ("во следующий вт", (next_weekday_date(Weekday::Tue), None)),
-            ("в следующую ср", (next_weekday_date(Weekday::Wed), None)),
-            ("В следующий чт", (next_weekday_date(Weekday::Thu), None)),
-            ("в следующую пт", (next_weekday_date(Weekday::Fri), None)),
-            ("В следующую сб", (next_weekday_date(Weekday::Sat), None)),
-            ("в следующий вс", (next_weekday_date(Weekday::Sun), None)),
-            ("во следующий вск", (next_weekday_date(Weekday::Sun), None)),
-            ("В следующий вос", (next_weekday_date(Weekday::Sun), None)),
-            ("в следующий воск", (next_weekday_date(Weekday::Sun), None)),
+            ("в следующий пн", (next_monday, None)),
+            ("во следующий вт", (next_tuesday, None)),
+            ("в следующую ср", (next_wednesday, None)),
+            ("В следующий чт", (next_thursday, None)),
+            ("в следующую пт", (next_friday, None)),
+            ("В следующую сб", (next_saturday, None)),
+            ("в следующий вс", (next_sunday, None)),
+            ("во следующий вск", (next_sunday, None)),
+            ("В следующий вос", (next_sunday, None)),
+            ("в следующий воск", (next_sunday, None)),
 
-            ("пн, делать глупости", (next_weekday_date(Weekday::Mon), Some("делать глупости"))),
-            ("вт тусить", (next_weekday_date(Weekday::Tue), Some("тусить"))),
-            ("в ср   ,     ", (next_weekday_date(Weekday::Wed), None)),
-            ("В чт           Собирать принтер", (next_weekday_date(Weekday::Thu), Some("Собирать принтер"))),
-            ("в пт  , ловить спутники", (next_weekday_date(Weekday::Fri), Some("ловить спутники"))),
-            ("В сб ломать жопы", (next_weekday_date(Weekday::Sat), Some("ломать жопы"))),
-            ("в вс паять платы", (next_weekday_date(Weekday::Sun), Some("паять платы"))),
-            ("во вск, делать глупости", (next_weekday_date(Weekday::Sun), Some("делать глупости"))),
-            ("В вос тусить", (next_weekday_date(Weekday::Sun), Some("тусить"))),
-            ("в воск Собирать принтер", (next_weekday_date(Weekday::Sun), Some("Собирать принтер"))),
+            ("пн, делать глупости", (next_monday, Some("делать глупости"))),
+            ("вт тусить", (next_tuesday, Some("тусить"))),
+            ("в ср   ,     ", (next_wednesday, None)),
+            ("В чт           Собирать принтер", (next_thursday, Some("Собирать принтер"))),
+            ("в пт  , ловить спутники", (next_friday, Some("ловить спутники"))),
+            ("В сб ломать жопы", (next_saturday, Some("ломать жопы"))),
+            ("в вс паять платы", (next_sunday, Some("паять платы"))),
+            ("во вск, делать глупости", (next_sunday, Some("делать глупости"))),
+            ("В вос тусить", (next_sunday, Some("тусить"))),
+            ("в воск Собирать принтер", (next_sunday, Some("Собирать принтер"))),
         
-            ("в след сб", (next_weekday_date(Weekday::Sat), None)),
-            ("в след вс", (next_weekday_date(Weekday::Sun), None)),
+            ("в след сб", (next_saturday, None)),
+            ("в след вс", (next_sunday, None)),
         ]);
 
         for (input, (expected_day, expected_purpose)) in test_cases {
-            let result = parse_message_with_date(input).unwrap();
+            let result = parse_message_with_date(today, input).unwrap();
             assert_eq!(result.day, Some(expected_day), "Test case: `{input}`");
             assert_eq!(
                 result.purpose.as_deref(),
@@ -367,33 +352,34 @@ mod tests {
 
     #[test]
     fn day_month() {
+        let today = NaiveDate::from_ymd_opt(2026, 01, 24).unwrap();
+
         #[rustfmt::skip]
         let test_cases = HashMap::from([
-            ("1 января",   (day_month_date(1, 1), None)),
-            ("15 февраля", (day_month_date(15, 2), None)),
-            ("20 марта",   (day_month_date(20, 3), None)),
-            ("5 апреля",   (day_month_date(5, 4), None)),
-            ("10 мая",     (day_month_date(10, 5), None)),
-            ("25 июня",    (day_month_date(25, 6), None)),
-            ("12 июля",    (day_month_date(12, 7), None)),
-            ("31 августа", (day_month_date(31, 8), None)),
-            ("7 сентября", (day_month_date(7, 9), None)),
-            ("18 октября", (day_month_date(18, 10), None)),
-            ("23 ноября",  (day_month_date(23, 11), None)),
-            ("30 декабря", (day_month_date(30, 12), None)),
+            ("1 января",   (NaiveDate::from_ymd_opt(2027, 1, 1), None)),
+            ("23 января",  (NaiveDate::from_ymd_opt(2027, 1, 23), None)),
+            ("24 января",  (NaiveDate::from_ymd_opt(2026, 1, 24), None)),
+            ("15 февраля", (NaiveDate::from_ymd_opt(2026, 2, 15), None)),
+            ("20 марта",   (NaiveDate::from_ymd_opt(2026, 3, 20), None)),
+            ("5 апреля",   (NaiveDate::from_ymd_opt(2026, 4, 5), None)),
+            ("10 мая",     (NaiveDate::from_ymd_opt(2026, 5, 10), None)),
+            ("25 июня",    (NaiveDate::from_ymd_opt(2026, 6, 25), None)),
+            ("12 июля",    (NaiveDate::from_ymd_opt(2026, 7, 12), None)),
+            ("31 августа", (NaiveDate::from_ymd_opt(2026, 8, 31), None)),
+            ("7 сентября", (NaiveDate::from_ymd_opt(2026, 9, 7), None)),
+            ("18 октября", (NaiveDate::from_ymd_opt(2026, 10, 18), None)),
+            ("23 ноября",  (NaiveDate::from_ymd_opt(2026, 11, 23), None)),
+            ("30 декабря", (NaiveDate::from_ymd_opt(2026, 12, 30), None)),
 
-            ("1 января, ловить спутники", (day_month_date(1, 1), Some("ловить спутники"))),
-            ("15 февраля ломать жопы", (day_month_date(15, 2), Some("ломать жопы"))),
-            ("20 марта   ,     ", (day_month_date(20, 3), None)),
-            ("5 апреля           паять платы", (day_month_date(5, 4), Some("паять платы"))),
-
-            ("5 января",   (day_month_date(5, 1), None)),
-            ("25 февраля", (day_month_date(25, 2), None)),
+            ("1 января, ловить спутники", (NaiveDate::from_ymd_opt(2027, 1, 1), Some("ловить спутники"))),
+            ("15 февраля ломать жопы", (NaiveDate::from_ymd_opt(2026, 02, 15), Some("ломать жопы"))),
+            ("20 марта   ,     ", (NaiveDate::from_ymd_opt(2026, 3, 20), None)),
+            ("5 апреля           паять платы", (NaiveDate::from_ymd_opt(2026, 4, 5), Some("паять платы"))),
         ]);
 
         for (input, (expected_day, expected_purpose)) in test_cases {
-            let result = parse_message_with_date(input).unwrap();
-            assert_eq!(result.day, Some(expected_day), "Test case: `{input}`");
+            let result = parse_message_with_date(today, input).unwrap();
+            assert_eq!(result.day, expected_day, "Test case: `{input}`");
             assert_eq!(
                 result.purpose.as_deref(),
                 expected_purpose,
@@ -404,40 +390,42 @@ mod tests {
 
     #[test]
     fn ymd_format() {
+        let today = NaiveDate::from_ymd_opt(2026, 01, 24).unwrap();
+
         #[rustfmt::skip]
         let test_cases = HashMap::from([
-            ("2200.09.10", (ymd(2200, 9, 10), None)),
-            ("2200-01.01", (ymd(2200, 1, 1),  None)),
-            ("2202.1.10",  (ymd(2202, 1, 10), None)),
-            ("2200.01.10", (ymd(2200, 1, 10), None)),
-            ("2200.09-10", (ymd(2200, 9, 10), None)),
-            ("2201-01-2",  (ymd(2201, 1, 2),  None)),
-            ("2200-01-10", (ymd(2200, 1, 10), None)),
-            ("2201.01.09", (ymd(2201, 1, 9),  None)),
+            ("2200.09.10", (NaiveDate::from_ymd_opt(2200, 9, 10), None)),
+            ("2200-01.01", (NaiveDate::from_ymd_opt(2200, 1, 1),  None)),
+            ("2202.1.10",  (NaiveDate::from_ymd_opt(2202, 1, 10), None)),
+            ("2200.01.10", (NaiveDate::from_ymd_opt(2200, 1, 10), None)),
+            ("2200.09-10", (NaiveDate::from_ymd_opt(2200, 9, 10), None)),
+            ("2201-01-2",  (NaiveDate::from_ymd_opt(2201, 1, 2),  None)),
+            ("2200-01-10", (NaiveDate::from_ymd_opt(2200, 1, 10), None)),
+            ("2201.01.09", (NaiveDate::from_ymd_opt(2201, 1, 9),  None)),
             (
                 "2222.10.19, пить пиво",
-                (ymd(2222, 10, 19), Some("пить пиво"))
+                (NaiveDate::from_ymd_opt(2222, 10, 19), Some("пить пиво"))
             ),
             (
-                "3322.01-23 радоваться жизни", (
-                ymd(3322, 1, 23), Some("радоваться жизни"))
+                "3322.01-23 радоваться жизни",
+                (NaiveDate::from_ymd_opt(3322, 1, 23), Some("радоваться жизни"))
             ),
             (
                 "2230.1.1   ,     ",
-                (ymd(2230, 1, 1), None)
+                (NaiveDate::from_ymd_opt(2230, 1, 1), None)
             ),
             (
                 "3020-5.23           идти к реке",
-                (ymd(3020, 5, 23), Some("идти к реке"))
+                (NaiveDate::from_ymd_opt(3020, 5, 23), Some("идти к реке"))
             ),
             (
                 "2301.07-6  , Децентрализироваться",
-                (ymd(2301, 7, 6), Some("Децентрализироваться"))
+                (NaiveDate::from_ymd_opt(2301, 7, 6), Some("Децентрализироваться"))
             ),
         ]);
 
         for (input, (expected_day, expected_purpose)) in test_cases {
-            let result = parse_message_with_date(input).unwrap();
+            let result = parse_message_with_date(today, input).unwrap();
             assert_eq!(result.day, expected_day, "Test case: `{input}`");
             assert_eq!(
                 result.purpose.as_deref(),
@@ -449,40 +437,42 @@ mod tests {
 
     #[test]
     fn dmy_format() {
+        let today = NaiveDate::from_ymd_opt(2026, 01, 24).unwrap();
+
         #[rustfmt::skip]
         let test_cases = HashMap::from([
-            ("10.09.2200", (ymd(2200, 9, 10), None)),
-            ("01-01-2200", (ymd(2200, 1, 1),  None)),
-            ("10.1.2202",  (ymd(2202, 1, 10), None)),
-            ("10.01.2200", (ymd(2200, 1, 10), None)),
-            ("10-09-2200", (ymd(2200, 9, 10), None)),
-            ("2-01-2201",  (ymd(2201, 1, 2),  None)),
-            ("10-01-2200", (ymd(2200, 1, 10), None)),
-            ("09.01.2201", (ymd(2201, 1, 9),  None)),
+            ("10.09.2200", (NaiveDate::from_ymd_opt(2200, 9, 10), None)),
+            ("01-01-2200", (NaiveDate::from_ymd_opt(2200, 1, 1),  None)),
+            ("10.1.2202",  (NaiveDate::from_ymd_opt(2202, 1, 10), None)),
+            ("10.01.2200", (NaiveDate::from_ymd_opt(2200, 1, 10), None)),
+            ("10-09-2200", (NaiveDate::from_ymd_opt(2200, 9, 10), None)),
+            ("2-01-2201",  (NaiveDate::from_ymd_opt(2201, 1, 2),  None)),
+            ("10-01-2200", (NaiveDate::from_ymd_opt(2200, 1, 10), None)),
+            ("09.01.2201", (NaiveDate::from_ymd_opt(2201, 1, 9),  None)),
             (
                 "19.10.2222, lorem ipsum dolor",
-                (ymd(2222, 10, 19), Some("lorem ipsum dolor"))
+                (NaiveDate::from_ymd_opt(2222, 10, 19), Some("lorem ipsum dolor"))
             ),
             (
                 "23-01-3322 причина визита неизвестна", (
-                ymd(3322, 1, 23), Some("причина визита неизвестна"))
+                NaiveDate::from_ymd_opt(3322, 1, 23), Some("причина визита неизвестна"))
             ),
             (
                 "1.1.2230   ,     ",
-                (ymd(2230, 1, 1), None)
+                (NaiveDate::from_ymd_opt(2230, 1, 1), None)
             ),
             (
                 "23.5.3020           надо подумать",
-                (ymd(3020, 5, 23), Some("надо подумать"))
+                (NaiveDate::from_ymd_opt(3020, 5, 23), Some("надо подумать"))
             ),
             (
                 "6-07-2301  , Централизовываться",
-                (ymd(2301, 7, 6), Some("Централизовываться"))
+                (NaiveDate::from_ymd_opt(2301, 7, 6), Some("Централизовываться"))
             ),
         ]);
 
         for (input, (expected_day, expected_purpose)) in test_cases {
-            let result = parse_message_with_date(input).unwrap();
+            let result = parse_message_with_date(today, input).unwrap();
             assert_eq!(result.day, expected_day, "Test case: `{input}`");
             assert_eq!(
                 result.purpose.as_deref(),
@@ -494,6 +484,8 @@ mod tests {
 
     #[test]
     fn no_date() {
+        let today = NaiveDate::from_ymd_opt(2026, 01, 24).unwrap();
+
         #[rustfmt::skip]
         let test_cases = HashMap::from([
             ("просто текст", (None, Some("просто текст"))),
@@ -508,7 +500,7 @@ mod tests {
         ]);
 
         for (input, (expected_day, expected_purpose)) in test_cases {
-            let result = parse_message_with_date(input).unwrap();
+            let result = parse_message_with_date(today, input).unwrap();
             assert_eq!(result.day, expected_day, "Test case: `{input}`");
             assert_eq!(
                 result.purpose.as_deref(),
@@ -520,6 +512,8 @@ mod tests {
 
     #[test]
     fn negative() {
+        let today = NaiveDate::from_ymd_opt(2026, 01, 24).unwrap();
+
         #[rustfmt::skip]
         let invalid_cases = vec![
             "1970.01.01",  // Date in the past
@@ -533,7 +527,7 @@ mod tests {
 
         for invalid_input in invalid_cases {
             assert!(
-                parse_message_with_date(invalid_input).is_err(),
+                parse_message_with_date(today, invalid_input).is_err(),
                 "Test case: `{invalid_input}`"
             );
         }

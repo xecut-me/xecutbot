@@ -68,7 +68,7 @@ fn strip_command(text: &str) -> &str {
 }
 
 fn parse_visit_text(author: Uid, msg: &str) -> Result<VisitUpdate> {
-    let ParsedMessage { day, purpose } = parse_message_with_date(msg)?;
+    let ParsedMessage { day, purpose } = parse_message_with_date(today(), msg)?;
 
     Ok(VisitUpdate {
         person: author,
