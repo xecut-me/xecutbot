@@ -170,7 +170,7 @@ mod tests {
 
     #[test]
     fn today_() {
-        let today = NaiveDate::from_ymd_opt(2026, 01, 24).unwrap();
+        let today = NaiveDate::from_ymd_opt(2026, 1, 24).unwrap();
 
         #[rustfmt::skip]
         let test_cases = HashMap::from([
@@ -198,8 +198,8 @@ mod tests {
 
     #[test]
     fn tomorrow() {
-        let today = NaiveDate::from_ymd_opt(2026, 01, 24).unwrap();
-        let tomorrow = NaiveDate::from_ymd_opt(2026, 01, 25).unwrap();
+        let today = NaiveDate::from_ymd_opt(2026, 1, 24).unwrap();
+        let tomorrow = NaiveDate::from_ymd_opt(2026, 1, 25).unwrap();
 
         #[rustfmt::skip]
         let test_cases = HashMap::from([
@@ -227,8 +227,8 @@ mod tests {
 
     #[test]
     fn day_after_tomorrow() {
-        let today = NaiveDate::from_ymd_opt(2026, 01, 24).unwrap();
-        let day_after_tomorrow = NaiveDate::from_ymd_opt(2026, 01, 26).unwrap();
+        let today = NaiveDate::from_ymd_opt(2026, 1, 24).unwrap();
+        let day_after_tomorrow = NaiveDate::from_ymd_opt(2026, 1, 26).unwrap();
 
         #[rustfmt::skip]
         let test_cases = HashMap::from([
@@ -361,7 +361,7 @@ mod tests {
 
     #[test]
     fn day_month() {
-        let today = NaiveDate::from_ymd_opt(2026, 01, 24).unwrap();
+        let today = NaiveDate::from_ymd_opt(2026, 1, 24).unwrap();
 
         #[rustfmt::skip]
         let test_cases = HashMap::from([
@@ -381,7 +381,7 @@ mod tests {
             ("30 декабря", (NaiveDate::from_ymd_opt(2026, 12, 30), None)),
 
             ("1 января, ловить спутники", (NaiveDate::from_ymd_opt(2027, 1, 1), Some("ловить спутники"))),
-            ("15 февраля ломать жопы", (NaiveDate::from_ymd_opt(2026, 02, 15), Some("ломать жопы"))),
+            ("15 февраля ломать жопы", (NaiveDate::from_ymd_opt(2026, 2, 15), Some("ломать жопы"))),
             ("20 марта   ,     ", (NaiveDate::from_ymd_opt(2026, 3, 20), None)),
             ("5 апреля           паять платы", (NaiveDate::from_ymd_opt(2026, 4, 5), Some("паять платы"))),
         ]);
@@ -399,7 +399,7 @@ mod tests {
 
     #[test]
     fn ymd_format() {
-        let today = NaiveDate::from_ymd_opt(2026, 01, 24).unwrap();
+        let today = NaiveDate::from_ymd_opt(2026, 1, 24).unwrap();
 
         #[rustfmt::skip]
         let test_cases = HashMap::from([
@@ -446,7 +446,7 @@ mod tests {
 
     #[test]
     fn dmy_format() {
-        let today = NaiveDate::from_ymd_opt(2026, 01, 24).unwrap();
+        let today = NaiveDate::from_ymd_opt(2026, 1, 24).unwrap();
 
         #[rustfmt::skip]
         let test_cases = HashMap::from([
@@ -493,7 +493,7 @@ mod tests {
 
     #[test]
     fn no_date() {
-        let today = NaiveDate::from_ymd_opt(2026, 01, 24).unwrap();
+        let today = NaiveDate::from_ymd_opt(2026, 1, 24).unwrap();
 
         #[rustfmt::skip]
         let test_cases = HashMap::from([
@@ -521,7 +521,7 @@ mod tests {
 
     #[test]
     fn negative() {
-        let today = NaiveDate::from_ymd_opt(2026, 01, 24).unwrap();
+        let today = NaiveDate::from_ymd_opt(2026, 1, 24).unwrap();
 
         #[rustfmt::skip]
         let invalid_cases = vec![

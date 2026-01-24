@@ -72,7 +72,7 @@ fn parse_visit_text(author: Uid, msg: &str) -> Result<VisitUpdate> {
 
     Ok(VisitUpdate {
         person: author,
-        day: day.unwrap_or_else(|| today()),
+        day: day.unwrap_or_else(today),
         purpose,
         status: VisitStatus::Planned,
     })
