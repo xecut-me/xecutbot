@@ -18,6 +18,9 @@
   git-hooks.hooks = {
     rustfmt.enable = true;
     clippy.enable = true;
+    clippy.settings.denyWarnings = true;
+    clippy.settings.allFeatures = true;
+    clippy.settings.extraArgs = "--all-targets";
   };
 
   packages = [
