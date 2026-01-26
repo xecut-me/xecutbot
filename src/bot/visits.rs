@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use chrono::{NaiveDate, TimeDelta};
+use chrono::TimeDelta;
 use itertools::Itertools as _;
 use teloxide::types::Message;
 
@@ -10,42 +10,25 @@ use crate::{
     Visit, VisitStatus,
     backend::{Backend, Uid},
     bot::util,
+    date::{ParsedMessage, parse_message_with_date},
     time::{format_date, today},
     visits::VisitUpdate,
 };
 
 use super::person_details::PersonDetails;
 
-fn parse_day_purpose(text: &str) -> (NaiveDate, &str) {
-    if let Some(purpose) = text.strip_prefix("завтра") {
-        return (today() + TimeDelta::days(1), purpose.trim());
-    }
-    if let Some(purpose) = text.strip_prefix("послезавтра") {
-        return (today() + TimeDelta::days(2), purpose.trim());
-    }
+pub(super) fn parse_visit_text(author: Uid, msg: &str) -> Result<VisitUpdate> {
+    let ParsedMessage { day, purpose } = parse_message_with_date(today(), msg)?;
 
-    let Ok((date, purpose)) = NaiveDate::parse_and_remainder(text, "%Y-%m-%d") else {
-        return (today(), text.trim());
-    };
-
-    (date, purpose.trim())
-}
-
-pub(super) fn parse_visit_text(author: Uid, msg: &str) -> VisitUpdate {
-    let (day, purpose) = parse_day_purpose(msg);
-    VisitUpdate {
+    Ok(VisitUpdate {
         person: author,
-        day,
-        purpose: if purpose.is_empty() {
-            None
-        } else {
-            Some(purpose.to_owned())
-        },
+        day: day.unwrap_or_else(today),
+        purpose,
         status: VisitStatus::Planned,
-    }
+    })
 }
 
-pub(super) fn parse_visit_message(msg: &Message) -> VisitUpdate {
+pub(super) fn parse_visit_message(msg: &Message) -> Result<VisitUpdate> {
     parse_visit_text(
         super::util::message_author(msg),
         super::util::message_text(msg),
@@ -129,7 +112,10 @@ impl<B: Backend> super::TelegramBot<B> {
     }
 
     pub(super) async fn handle_plan_visit(&self, msg: &Message) -> Result<()> {
-        let visit_update = parse_visit_message(msg);
+        let Ok(visit_update) = parse_visit_message(msg) else {
+            self.send_message_reply(msg, "Плохая дата").await?;
+            return Ok(());
+        };
 
         self.backend()
             .plan_visit(visit_update.person, visit_update.day, visit_update.purpose)
@@ -141,7 +127,10 @@ impl<B: Backend> super::TelegramBot<B> {
     }
 
     pub(super) async fn handle_unplan_visit(&self, msg: &Message) -> Result<()> {
-        let visit_update = parse_visit_message(msg);
+        let Ok(visit_update) = parse_visit_message(msg) else {
+            self.send_message_reply(msg, "Плохая дата").await?;
+            return Ok(());
+        };
 
         self.backend()
             .unplan_visit(visit_update.person, visit_update.day)

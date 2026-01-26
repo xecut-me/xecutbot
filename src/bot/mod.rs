@@ -193,6 +193,10 @@ impl<B: Backend> TelegramBot<B> {
     }
 
     async fn handle_callback(&self, q: &CallbackQuery) -> Result<()> {
+        let msg = q
+            .regular_message()
+            .ok_or_else(|| anyhow::anyhow!("message too old"))?;
+
         let Some(data) = q.data.as_deref() else {
             return Ok(());
         };
@@ -200,12 +204,20 @@ impl<B: Backend> TelegramBot<B> {
         let author = Uid(q.from.id);
 
         if data.starts_with("/planvisit") {
-            let visit_update = visits::parse_visit_text(author, util::strip_command(data));
+            let Ok(visit_update) = visits::parse_visit_text(author, util::strip_command(data))
+            else {
+                self.send_message_reply(msg, "Плохая дата").await?;
+                return Ok(());
+            };
             self.backend()
                 .plan_visit(visit_update.person, visit_update.day, visit_update.purpose)
                 .await?;
         } else if data.starts_with("/unplanvisit") {
-            let visit_update = visits::parse_visit_text(author, util::strip_command(data));
+            let Ok(visit_update) = visits::parse_visit_text(author, util::strip_command(data))
+            else {
+                self.send_message_reply(msg, "Плохая дата").await?;
+                return Ok(());
+            };
             self.backend()
                 .unplan_visit(visit_update.person, visit_update.day)
                 .await?;
