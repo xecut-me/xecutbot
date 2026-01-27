@@ -10,19 +10,18 @@ use crate::{
     Visit, VisitStatus,
     backend::{Backend, Uid},
     bot::util,
-    date::{ParsedMessage, parse_message_with_date},
-    time::{format_date, today},
+    datetime::{ParsedMessage, format_date, parse_message_with_date, today_abstract},
     visits::VisitUpdate,
 };
 
 use super::person_details::PersonDetails;
 
 pub(super) fn parse_visit_text(author: Uid, msg: &str) -> Result<VisitUpdate> {
-    let ParsedMessage { day, purpose } = parse_message_with_date(today(), msg)?;
+    let ParsedMessage { day, purpose } = parse_message_with_date(today_abstract(), msg)?;
 
     Ok(VisitUpdate {
         person: author,
-        day: day.unwrap_or_else(today),
+        day: day.unwrap_or_else(today_abstract),
         purpose,
         status: VisitStatus::Planned,
     })
@@ -77,12 +76,18 @@ impl<B: Backend> super::TelegramBot<B> {
         mut vs: Vec<Visit>,
         details: &HashMap<Uid, PersonDetails>,
     ) -> String {
+        let today = today_abstract();
+
         vs.sort_by_key(|v| v.day);
 
         vs.chunk_by(|v1, v2| v1.day == v2.day)
             .map(|vs| {
                 let day = vs[0].day;
-                format!("{}:\n{}", format_date(day), self.format_day(vs, details))
+                format!(
+                    "{}:\n{}",
+                    format_date(day, today),
+                    self.format_day(vs, details)
+                )
             })
             .join("\n\n")
     }
@@ -90,7 +95,7 @@ impl<B: Backend> super::TelegramBot<B> {
     pub(super) async fn handle_get_visits(&self, msg: &Message) -> Result<()> {
         let visits = self
             .backend()
-            .get_visits(today(), today() + TimeDelta::days(185))
+            .get_visits(today_abstract(), today_abstract() + TimeDelta::days(185))
             .await?;
 
         let details = self

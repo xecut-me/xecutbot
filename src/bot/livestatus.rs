@@ -119,7 +119,7 @@ impl<B: Backend> super::TelegramBot<B> {
     fn get_full_live_status(live_status: &str) -> String {
         live_status.to_owned()
             + "\n\nОбновлено: "
-            + &crate::time::now()
+            + &crate::datetime::now()
                 .format_localized("%c %Z", Locale::ru_RU)
                 .to_string()
     }

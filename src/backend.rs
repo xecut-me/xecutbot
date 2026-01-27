@@ -10,8 +10,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::bot::TelegramBot;
 use crate::config::{BackendConfig, DbConfig};
+use crate::datetime::today_abstract;
 use crate::rest_api::RestApi;
-use crate::time::today;
 use crate::visits::VisitUpdate;
 use crate::{Config, Visit, VisitStatus, Visits};
 
@@ -82,7 +82,7 @@ impl Backend for BackendImpl {
     async fn check_in(&self, person: Uid, purpose: Option<String>) -> Result<()> {
         let visit_update = VisitUpdate {
             person,
-            day: today(),
+            day: today_abstract(),
             purpose,
             status: VisitStatus::CheckedIn,
         };
@@ -99,7 +99,7 @@ impl Backend for BackendImpl {
     async fn check_out(&self, person: Uid) -> Result<()> {
         let visit_update = VisitUpdate {
             person,
-            day: today(),
+            day: today_abstract(),
             purpose: None,
             status: VisitStatus::CheckedOut,
         };
@@ -139,7 +139,7 @@ impl Backend for BackendImpl {
     }
 
     async fn check_out_everybody(&self) -> Result<()> {
-        self.visits.check_out_everybody(today()).await?;
+        self.visits.check_out_everybody(today_abstract()).await?;
         Ok(())
     }
 

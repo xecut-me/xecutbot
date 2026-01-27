@@ -12,7 +12,7 @@ use derive_where::derive_where;
 use tokio_util::sync::CancellationToken;
 use tower_http::catch_panic::CatchPanicLayer;
 
-use crate::{VisitStatus, backend::Backend, config::RestApiConfig, time::today};
+use crate::{VisitStatus, backend::Backend, config::RestApiConfig, datetime::today_abstract};
 
 #[derive_where(Clone)]
 pub struct RestApi<B: Backend> {
@@ -47,7 +47,7 @@ impl<B: Backend> RestApi<B> {
     async fn checked_in_count(
         State(state): State<RestApi<B>>,
     ) -> Result<impl IntoResponse, ApiError> {
-        let today = today();
+        let today = today_abstract();
         let checked_in = state
             .backend
             .upgrade()

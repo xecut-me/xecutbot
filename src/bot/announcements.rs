@@ -1,6 +1,6 @@
 use crate::{
     backend::{Backend, Uid},
-    time::{format_close_date, format_date},
+    datetime::{format_close_date, format_date, today_abstract},
     visits::VisitUpdate,
 };
 use anyhow::Result;
@@ -32,11 +32,12 @@ impl<B: Backend> super::TelegramBot<B> {
     }
 
     pub async fn announce_plan(&self, visit_update: &VisitUpdate) -> Result<()> {
+        let today = today_abstract();
         let day = visit_update.day;
         self.send_message_public_chat(format!(
             "🗓️🚋 {} планирует зайти в хакспейс {}{}",
             self.format_person_link(&self.fetch_person_details(visit_update.person).await?),
-            format_date(day),
+            format_date(day, today),
             visit_update
                 .purpose
                 .as_deref()
@@ -48,7 +49,7 @@ impl<B: Backend> super::TelegramBot<B> {
                 InlineKeyboardButton::callback(
                     format!(
                         "🚋 Я тоже зайду {}",
-                        format_close_date(day).unwrap_or("в этот день")
+                        format_close_date(day, today).unwrap_or("в этот день")
                     ),
                     format!("/planvisit {}", day),
                 ),
@@ -60,17 +61,18 @@ impl<B: Backend> super::TelegramBot<B> {
     }
 
     pub async fn announce_unplan(&self, person: Uid, day: NaiveDate) -> Result<()> {
+        let today = today_abstract();
         self.send_message_public_chat(format!(
             "🗓️🤔 {} больше не планирует зайти в хакспейс {}",
             self.format_person_link(&self.fetch_person_details(person).await?),
-            format_date(day)
+            format_date(day, today)
         ))
         .reply_markup(InlineKeyboardMarkup {
             inline_keyboard: vec![vec![
                 InlineKeyboardButton::callback(
                     format!(
                         "🚋 А я приду {}",
-                        format_close_date(day).unwrap_or("в этот день")
+                        format_close_date(day, today).unwrap_or("в этот день")
                     ),
                     format!("/planvisit {}", day),
                 ),

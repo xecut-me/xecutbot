@@ -3,11 +3,11 @@ use chrono::TimeDelta;
 use itertools::Itertools as _;
 use teloxide::types::Message;
 
-use crate::{VisitStatus, backend::Backend, time::today};
+use crate::{VisitStatus, backend::Backend, datetime::today_abstract};
 
 impl<B: Backend> super::TelegramBot<B> {
     pub(super) async fn get_status(&self) -> Result<String> {
-        let today = today();
+        let today = today_abstract();
         let mut visits = self.backend().get_visits(today, today).await?;
 
         let details = self
