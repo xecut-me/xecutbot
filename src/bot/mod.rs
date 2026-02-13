@@ -3,15 +3,18 @@ mod livestatus;
 mod person_details;
 mod status;
 mod util;
+mod verification;
 mod visits;
 
 use anyhow::Result;
 use futures::FutureExt;
 use std::{
+    collections::HashMap,
     panic::AssertUnwindSafe,
     sync::{Arc, RwLock, Weak},
     time::Duration,
 };
+use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use teloxide::{
@@ -19,7 +22,7 @@ use teloxide::{
     dispatching::{HandlerExt as _, UpdateFilterExt as _},
     dptree,
     prelude::{Dispatcher, Requester as _},
-    types::{CallbackQuery, Message, MessageId, Update},
+    types::{CallbackQuery, Message, MessageId, Update, UserId},
     utils::command::BotCommands,
 };
 
@@ -59,10 +62,18 @@ enum Command {
     Update,
 }
 
+#[derive(Debug)]
+struct PendingVerification {
+    user_id: UserId,
+    message_id: MessageId,
+    timer_handle: JoinHandle<()>,
+}
+
 pub struct TelegramBot<B: Backend> {
     config: TelegramBotConfig,
     pub bot: Bot,
     status_message_id: RwLock<Option<MessageId>>,
+    pending_verifications: RwLock<HashMap<UserId, PendingVerification>>,
     backend: Weak<B>,
 }
 
@@ -73,6 +84,7 @@ impl<B: Backend> TelegramBot<B> {
             config,
             bot,
             status_message_id: RwLock::new(None),
+            pending_verifications: RwLock::new(HashMap::new()),
             backend,
         }))
     }
@@ -89,6 +101,17 @@ impl<B: Backend> TelegramBot<B> {
         Ok(())
     }
 
+    async fn cleanup_verifications(&self) {
+        let mut verifications = self.pending_verifications.write().unwrap();
+        for (user_id, verification) in verifications.drain() {
+            verification.timer_handle.abort();
+            log::info!(
+                "Aborted verification timer for user {} on shutdown",
+                user_id
+            );
+        }
+    }
+
     pub async fn run(self: Arc<Self>, ct: CancellationToken) -> Result<()> {
         self.bot.set_my_commands(Command::bot_commands()).await?;
 
@@ -103,6 +126,11 @@ impl<B: Backend> TelegramBot<B> {
                 Update::filter_message()
                     .filter_command::<Command>()
                     .endpoint(Self::handle_message),
+            )
+            .branch(
+                Update::filter_message()
+                    .filter(|msg: Message| msg.new_chat_members().is_some())
+                    .endpoint(Self::handle_new_member),
             )
             .branch(Update::filter_callback_query().endpoint(Self::handle_callback_outer));
 
@@ -128,6 +156,9 @@ impl<B: Backend> TelegramBot<B> {
             }),
             tokio::spawn(self.clone().update_live_task(ct))
         )?;
+
+        // Cleanup pending verifications on shutdown
+        self.cleanup_verifications().await;
 
         Ok(())
     }
@@ -176,6 +207,41 @@ impl<B: Backend> TelegramBot<B> {
         Ok(())
     }
 
+    async fn handle_new_member(self: Arc<Self>, msg: Message) -> Result<()> {
+        let res = AssertUnwindSafe(async {
+            // Check if this is the public chat
+            if msg.chat.id != self.config.public_chat_id {
+                return Ok(());
+            }
+
+            let Some(new_members) = msg.new_chat_members() else {
+                return Ok(());
+            };
+
+            // Process each new member
+            for user in new_members {
+                // Skip bots that are already marked as bots (added by admins)
+                if user.is_bot {
+                    continue;
+                }
+
+                self.initiate_verification(user).await?;
+            }
+
+            Ok(())
+        })
+        .catch_unwind()
+        .await;
+
+        if matches!(res, Err(_) | Ok(Err(_))) {
+            self.send_alert().await?;
+            if let Ok(e) = res {
+                return e;
+            }
+        }
+        Ok(())
+    }
+
     async fn handle_callback_outer(self: Arc<Self>, q: CallbackQuery) -> Result<()> {
         let res = AssertUnwindSafe(self.handle_callback(&q))
             .catch_unwind()
@@ -199,7 +265,14 @@ impl<B: Backend> TelegramBot<B> {
 
         let author = Uid(q.from.id);
 
-        if data.starts_with("/planvisit") {
+        if data.starts_with("/verify_") {
+            // Extract target user ID from callback data
+            let target_user_id_str = data.strip_prefix("/verify_").unwrap();
+            let target_user_id = UserId(target_user_id_str.parse::<u64>()?);
+
+            self.handle_verification_callback(q.from.id, target_user_id)
+                .await?;
+        } else if data.starts_with("/planvisit") {
             let visit_update = visits::parse_visit_text(author, util::strip_command(data))
                 .expect("parsable date format in callback");
             self.backend()
