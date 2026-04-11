@@ -155,7 +155,7 @@ fn parse_ymd_date(base_date: NaiveDate, year: &str, month: &str, day: &str) -> R
 }
 
 fn parse_purpose(purpose: Option<Match<'_>>) -> Option<String> {
-    let purpose = purpose?.as_str().trim();
+    let purpose = purpose?.as_str().trim().trim_matches(['"', '\'']);
     if !purpose.is_empty() {
         Some(purpose.to_owned())
     } else {
@@ -343,7 +343,7 @@ mod tests {
             ("во вск, делать глупости", (next_sunday, Some("делать глупости"))),
             ("В вос тусить", (next_sunday, Some("тусить"))),
             ("в воск Собирать принтер", (next_sunday, Some("Собирать принтер"))),
-        
+
             ("в след сб", (next_saturday, None)),
             ("в след вс", (next_sunday, None)),
         ]);
