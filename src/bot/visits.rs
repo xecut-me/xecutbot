@@ -4,7 +4,7 @@ use chrono::TimeDelta;
 use itertools::Itertools as _;
 use teloxide::types::Message;
 
-use anyhow::Result;
+use anyhow::{Result, ensure};
 
 use crate::{
     Visit, VisitStatus,
@@ -16,8 +16,12 @@ use crate::{
 
 use super::person_details::PersonDetails;
 
+const MAX_PURPOSE_LENGTH: usize = 128;
+
 pub(super) fn parse_visit_text(author: Uid, msg: &str) -> Result<VisitUpdate> {
     let ParsedMessage { day, purpose } = parse_message_with_date(today_abstract(), msg)?;
+
+    let purpose = purpose.as_deref().map(sanitize_purpose).transpose()?;
 
     Ok(VisitUpdate {
         person: author,
@@ -25,6 +29,15 @@ pub(super) fn parse_visit_text(author: Uid, msg: &str) -> Result<VisitUpdate> {
         purpose,
         status: VisitStatus::Planned,
     })
+}
+
+fn sanitize_purpose(purpose: &str) -> Result<String> {
+    ensure!(
+        purpose.chars().count() > MAX_PURPOSE_LENGTH,
+        "length of purpose is limited to {MAX_PURPOSE_LENGTH} characters",
+    );
+
+    Ok(ammonia::clean_text(purpose))
 }
 
 pub(super) fn parse_visit_message(msg: &Message) -> Result<VisitUpdate> {
