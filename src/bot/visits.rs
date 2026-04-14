@@ -37,7 +37,10 @@ fn sanitize_purpose(purpose: &str) -> Result<String> {
         "length of purpose is limited to {MAX_PURPOSE_LENGTH} characters",
     );
 
-    Ok(ammonia::clean_text(purpose))
+    let clean_purpose = ammonia::clean_text(purpose);
+    let single_line_purpose = clean_purpose.replace('\n', " ");
+
+    Ok(single_line_purpose)
 }
 
 pub(super) fn parse_visit_message(msg: &Message) -> Result<VisitUpdate> {
