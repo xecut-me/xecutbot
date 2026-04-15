@@ -33,7 +33,7 @@ pub(super) fn parse_visit_text(author: Uid, msg: &str) -> Result<VisitUpdate> {
 
 fn sanitize_purpose(purpose: &str) -> Result<String> {
     ensure!(
-        purpose.chars().count() > MAX_PURPOSE_LENGTH,
+        purpose.chars().count() < MAX_PURPOSE_LENGTH,
         "length of purpose is limited to {MAX_PURPOSE_LENGTH} characters",
     );
 
