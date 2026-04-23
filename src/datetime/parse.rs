@@ -209,9 +209,6 @@ fn clean_text(src: &str) -> String {
         let replacement = match c {
             '<' => "&lt;",
             '>' => "&gt;",
-            '\"' => "&quot;",
-            '\'' => "&apos;",
-            '`' => "&grave;",
             '/' => "&#47;",
             '&' => "&amp;",
             '=' => "&#61;",
