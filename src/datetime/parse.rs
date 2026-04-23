@@ -1,11 +1,38 @@
-use anyhow::{Result, bail};
+use anyhow::Result;
 use chrono::{Datelike, NaiveDate, TimeDelta, Weekday};
 use regex::{Match, Regex, RegexBuilder};
 use std::sync::LazyLock;
+use thiserror::Error;
+
+const MAX_PURPOSE_LENGTH: usize = 128;
 
 pub struct ParsedMessage {
     pub day: Option<NaiveDate>,
     pub purpose: Option<String>,
+}
+
+#[derive(Debug, Error)]
+pub enum Error {
+    #[error("date in the past")]
+    PastDate,
+
+    #[error("invalid date {year}-{month}-{day}")]
+    InvalidDate { year: i32, month: u32, day: u32 },
+
+    #[error("too long purpose")]
+    TooLongPurpose,
+}
+
+impl Error {
+    pub fn to_human(&self) -> String {
+        match self {
+            Self::PastDate => "Дата не должна быть в прошлом".to_owned(),
+            Self::InvalidDate { year, month, day } => {
+                format!("Неправильная дата {year}-{month:02}-{day:02}")
+            }
+            Self::TooLongPurpose => "Слишком длинная причина визита".to_owned(),
+        }
+    }
 }
 
 static RELATIVE_DAY: LazyLock<Regex> =
@@ -29,40 +56,36 @@ static YMD: LazyLock<Regex> =
 static DMY: LazyLock<Regex> =
     LazyLock::new(|| regex(r"^(\d{1,2})[-\.](\d{1,2})[-\.](\d{4})[\s\.,]*(\s+.*)?$"));
 
-pub fn parse_message_with_date(base_date: NaiveDate, text: &str) -> Result<ParsedMessage> {
+pub fn parse_message_with_date(base_date: NaiveDate, text: &str) -> Result<ParsedMessage, Error> {
     if let Some(c) = RELATIVE_DAY.captures(text) {
         Ok(ParsedMessage {
             day: Some(calculate_relative_day(base_date, &c[1])),
-            purpose: parse_purpose(c.get(2)),
+            purpose: try_parse_purpose_match(c.get(2))?,
         })
     } else if let Some(c) = NEXT_WEEKDAY.captures(text) {
         Ok(ParsedMessage {
             day: Some(calculate_next_weekday(base_date, &c[4])),
-            purpose: parse_purpose(c.get(12)),
+            purpose: try_parse_purpose_match(c.get(12))?,
         })
     } else if let Some(c) = DAY_MONTH.captures(text) {
         Ok(ParsedMessage {
             day: Some(parse_day_month_date(base_date, &c[1], &c[2])?),
-            purpose: parse_purpose(c.get(3)),
+            purpose: try_parse_purpose_match(c.get(3))?,
         })
     } else if let Some(c) = YMD.captures(text) {
         Ok(ParsedMessage {
             day: Some(parse_ymd_date(base_date, &c[1], &c[2], &c[3])?),
-            purpose: parse_purpose(c.get(4)),
+            purpose: try_parse_purpose_match(c.get(4))?,
         })
     } else if let Some(c) = DMY.captures(text) {
         Ok(ParsedMessage {
             day: Some(parse_ymd_date(base_date, &c[3], &c[2], &c[1])?),
-            purpose: parse_purpose(c.get(4)),
+            purpose: try_parse_purpose_match(c.get(4))?,
         })
     } else {
         Ok(ParsedMessage {
             day: None,
-            purpose: if !text.trim().is_empty() {
-                Some(text.trim().to_owned())
-            } else {
-                None
-            },
+            purpose: try_parse_purpose(text)?,
         })
     }
 }
@@ -110,7 +133,7 @@ fn calculate_next_weekday(base_date: NaiveDate, weekday: &str) -> NaiveDate {
     base_date + TimeDelta::days(days.into())
 }
 
-fn parse_day_month_date(base_date: NaiveDate, day: &str, month: &str) -> Result<NaiveDate> {
+fn parse_day_month_date(base_date: NaiveDate, day: &str, month: &str) -> Result<NaiveDate, Error> {
     let day = day.parse().unwrap();
 
     let month = match month {
@@ -135,32 +158,81 @@ fn parse_day_month_date(base_date: NaiveDate, day: &str, month: &str) -> Result<
         base_date.year()
     };
 
-    NaiveDate::from_ymd_opt(year, month, day)
-        .ok_or_else(|| anyhow::anyhow!("invalid date: {}-{}-{}", year, month, day))
+    NaiveDate::from_ymd_opt(year, month, day).ok_or(Error::InvalidDate { year, month, day })
 }
 
-fn parse_ymd_date(base_date: NaiveDate, year: &str, month: &str, day: &str) -> Result<NaiveDate> {
+fn parse_ymd_date(
+    base_date: NaiveDate,
+    year: &str,
+    month: &str,
+    day: &str,
+) -> Result<NaiveDate, Error> {
     let year = year.parse().unwrap();
     let month = month.parse().unwrap();
     let day = day.parse().unwrap();
 
-    let date = NaiveDate::from_ymd_opt(year, month, day)
-        .ok_or_else(|| anyhow::anyhow!("invalid date: {}-{}-{}", year, month, day))?;
+    let date =
+        NaiveDate::from_ymd_opt(year, month, day).ok_or(Error::InvalidDate { year, month, day })?;
 
     if date < base_date {
-        bail!("date cannot be in the past");
+        return Err(Error::PastDate);
     }
 
     Ok(date)
 }
 
-fn parse_purpose(purpose: Option<Match<'_>>) -> Option<String> {
-    let purpose = purpose?.as_str().trim().trim_matches(['"', '\'']);
-    if !purpose.is_empty() {
-        Some(purpose.to_owned())
-    } else {
-        None
+fn try_parse_purpose_match(purpose: Option<Match<'_>>) -> Result<Option<String>, Error> {
+    let Some(purpose) = purpose else {
+        return Ok(None);
+    };
+
+    try_parse_purpose(purpose.as_str())
+}
+
+fn try_parse_purpose(purpose: &str) -> Result<Option<String>, Error> {
+    let purpose = purpose.trim().trim_matches(['"', '\'', '\n']);
+    if purpose.is_empty() {
+        return Ok(None);
     }
+
+    if purpose.len() > MAX_PURPOSE_LENGTH {
+        return Err(Error::TooLongPurpose);
+    }
+
+    Ok(Some(clean_text(purpose)))
+}
+
+fn clean_text(src: &str) -> String {
+    let mut res = String::with_capacity(src.len());
+    for c in src.chars() {
+        let replacement = match c {
+            '<' => "&lt;",
+            '>' => "&gt;",
+            '\"' => "&quot;",
+            '\'' => "&apos;",
+            '`' => "&grave;",
+            '/' => "&#47;",
+            '&' => "&amp;",
+            '=' => "&#61;",
+            ' ' => " ",
+            '\t' => " ",
+            '\n' => " ",
+            '\x0c' => " ",
+            '\r' => " ",
+            _ => {
+                res.push(c);
+                continue;
+            }
+        };
+
+        if res.ends_with(' ') && replacement == " " {
+            continue;
+        }
+
+        res.push_str(replacement);
+    }
+
+    res.trim().to_owned()
 }
 
 #[cfg(test)]
@@ -502,7 +574,7 @@ mod tests {
             ("   ", (None, None)),
             ("какая-то случайная строка", (None, Some("какая-то случайная строка"))),
             ("встреча завтра но не сегодня", (None, Some("встреча завтра но не сегодня"))),
-            ("10/01/2026", (None, Some("10/01/2026"))),
+            ("10/01/2026", (None, Some("10&#47;01&#47;2026"))),
             ("9 лепня 2026", (None, Some("9 лепня 2026"))),
             ("Сегодняшний вечер перестаёт быть томным", (None, Some("Сегодняшний вечер перестаёт быть томным"))),
             ("Воскресный день", (None, Some("Воскресный день"))),
