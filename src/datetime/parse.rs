@@ -51,10 +51,10 @@ static DAY_MONTH: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 static YMD: LazyLock<Regex> =
-    LazyLock::new(|| regex(r"^(\d{4})[-\.](\d{1,2})[-\.](\d{1,2})[\s\.,]*(\s+.*)?$"));
+    LazyLock::new(|| regex(r"^(\d{4})[-\./](\d{1,2})[-\./](\d{1,2})[\s\.,]*(\s+.*)?$"));
 
 static DMY: LazyLock<Regex> =
-    LazyLock::new(|| regex(r"^(\d{1,2})[-\.](\d{1,2})[-\.](\d{4})[\s\.,]*(\s+.*)?$"));
+    LazyLock::new(|| regex(r"^(\d{1,2})[-\./](\d{1,2})[-\./](\d{4})[\s\.,]*(\s+.*)?$"));
 
 pub fn parse_message_with_date(base_date: NaiveDate, text: &str) -> Result<ParsedMessage, Error> {
     if let Some(c) = RELATIVE_DAY.captures(text) {
