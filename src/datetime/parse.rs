@@ -94,6 +94,7 @@ fn regex(pattern: &str) -> Regex {
     RegexBuilder::new(pattern)
         .unicode(true)
         .case_insensitive(true)
+        .dot_matches_new_line(true)
         .build()
         .expect("pattern should be valid")
 }
