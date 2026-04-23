@@ -4,24 +4,23 @@ use chrono::TimeDelta;
 use itertools::Itertools as _;
 use teloxide::types::Message;
 
-use anyhow::{Result, ensure};
+use anyhow::Result;
 
 use crate::{
     Visit, VisitStatus,
     backend::{Backend, Uid},
     bot::util,
-    datetime::{ParsedMessage, format_date, parse_message_with_date, today_abstract},
+    datetime::{self, ParsedMessage, format_date, parse_message_with_date, today_abstract},
     visits::VisitUpdate,
 };
 
 use super::person_details::PersonDetails;
 
-const MAX_PURPOSE_LENGTH: usize = 128;
-
-pub(super) fn parse_visit_text(author: Uid, msg: &str) -> Result<VisitUpdate> {
+pub(super) fn parse_visit_text(
+    author: Uid,
+    msg: &str,
+) -> Result<VisitUpdate, datetime::ParseError> {
     let ParsedMessage { day, purpose } = parse_message_with_date(today_abstract(), msg)?;
-
-    let purpose = purpose.as_deref().map(sanitize_purpose).transpose()?;
 
     Ok(VisitUpdate {
         person: author,
@@ -29,25 +28,6 @@ pub(super) fn parse_visit_text(author: Uid, msg: &str) -> Result<VisitUpdate> {
         purpose,
         status: VisitStatus::Planned,
     })
-}
-
-fn sanitize_purpose(purpose: &str) -> Result<String> {
-    ensure!(
-        purpose.chars().count() < MAX_PURPOSE_LENGTH,
-        "length of purpose is limited to {MAX_PURPOSE_LENGTH} characters",
-    );
-
-    let clean_purpose = ammonia::clean_text(purpose);
-    let single_line_purpose = clean_purpose.replace('\n', " ");
-
-    Ok(single_line_purpose)
-}
-
-pub(super) fn parse_visit_message(msg: &Message) -> Result<VisitUpdate> {
-    parse_visit_text(
-        super::util::message_author(msg),
-        super::util::message_text(msg),
-    )
 }
 
 impl<B: Backend> super::TelegramBot<B> {
@@ -133,10 +113,7 @@ impl<B: Backend> super::TelegramBot<B> {
     }
 
     pub(super) async fn handle_plan_visit(&self, msg: &Message) -> Result<()> {
-        let Ok(visit_update) = parse_visit_message(msg) else {
-            self.send_message_reply(msg, "Плохая дата").await?;
-            return Ok(());
-        };
+        let visit_update = self.parse_visit_message_with_feedback(msg).await?;
 
         self.backend()
             .plan_visit(visit_update.person, visit_update.day, visit_update.purpose)
@@ -148,10 +125,7 @@ impl<B: Backend> super::TelegramBot<B> {
     }
 
     pub(super) async fn handle_unplan_visit(&self, msg: &Message) -> Result<()> {
-        let Ok(visit_update) = parse_visit_message(msg) else {
-            self.send_message_reply(msg, "Плохая дата").await?;
-            return Ok(());
-        };
+        let visit_update = self.parse_visit_message_with_feedback(msg).await?;
 
         self.backend()
             .unplan_visit(visit_update.person, visit_update.day)
@@ -160,6 +134,24 @@ impl<B: Backend> super::TelegramBot<B> {
         self.acknowledge_message(msg).await?;
 
         Ok(())
+    }
+
+    pub(super) async fn parse_visit_message_with_feedback(
+        &self,
+        msg: &Message,
+    ) -> Result<VisitUpdate> {
+        let parse_result = parse_visit_text(
+            super::util::message_author(msg),
+            super::util::message_text(msg),
+        );
+
+        match parse_result {
+            Ok(visit_update) => Ok(visit_update),
+            Err(err) => {
+                self.send_message_reply(msg, err.to_human()).await?;
+                Err(err.into())
+            }
+        }
     }
 
     pub(super) async fn handle_check_in(&self, msg: &Message) -> Result<()> {
