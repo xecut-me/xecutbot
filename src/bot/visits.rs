@@ -113,7 +113,9 @@ impl<B: Backend> super::TelegramBot<B> {
     }
 
     pub(super) async fn handle_plan_visit(&self, msg: &Message) -> Result<()> {
-        let visit_update = self.parse_visit_message_with_feedback(msg).await?;
+        let Some(visit_update) = self.parse_visit_message_with_feedback(msg).await? else {
+            return Ok(());
+        };
 
         self.backend()
             .plan_visit(visit_update.person, visit_update.day, visit_update.purpose)
@@ -125,7 +127,9 @@ impl<B: Backend> super::TelegramBot<B> {
     }
 
     pub(super) async fn handle_unplan_visit(&self, msg: &Message) -> Result<()> {
-        let visit_update = self.parse_visit_message_with_feedback(msg).await?;
+        let Some(visit_update) = self.parse_visit_message_with_feedback(msg).await? else {
+            return Ok(());
+        };
 
         self.backend()
             .unplan_visit(visit_update.person, visit_update.day)
@@ -139,17 +143,17 @@ impl<B: Backend> super::TelegramBot<B> {
     pub(super) async fn parse_visit_message_with_feedback(
         &self,
         msg: &Message,
-    ) -> Result<VisitUpdate> {
+    ) -> Result<Option<VisitUpdate>> {
         let parse_result = parse_visit_text(
             super::util::message_author(msg),
             super::util::message_text(msg),
         );
 
         match parse_result {
-            Ok(visit_update) => Ok(visit_update),
+            Ok(visit_update) => Ok(Some(visit_update)),
             Err(err) => {
                 self.send_message_reply(msg, err.to_human()).await?;
-                Err(err.into())
+                Ok(None)
             }
         }
     }
